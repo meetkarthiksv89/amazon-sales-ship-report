@@ -489,7 +489,7 @@ const App = () => {
             >
               {loading ? '⏳ Processing...' : 
                !ratesLoaded ? '⏳ Loading Rates...' : 
-               '🧮 Calculate Self-Ship Costs'}
+               '📊 Generate Report'}
             </button>
           </div>
         )}
