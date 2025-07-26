@@ -368,7 +368,7 @@ const App = () => {
     <div className="app">
       <div className="container">
         <header className="header">
-          <h1>🚚 Amazon Self-Ship Report</h1>
+          <h1>🚚 Amazon Report</h1>
         </header>
 
         {error && (
@@ -482,7 +482,7 @@ const App = () => {
         {results.length > 0 && (
           <div className="results-section">
             <div className="results-header">
-              <h2>📊 Self-Ship Calculation Results</h2>
+              <h2>📊 Self-Ship</h2>
               <div className="results-actions">
                 <input
                   type="file"
@@ -576,7 +576,7 @@ const App = () => {
         {productSalesData.length > 0 && (
           <div className="results-section">
             <div className="results-header">
-              <h2>📈 Product Sales by Variant (Excluding Cancelled Orders)</h2>
+                             <h2>📈 Product Sales</h2>
             </div>
 
             <div className="summary">
