@@ -11,6 +11,8 @@ const App = () => {
   const [uploadStatus, setUploadStatus] = useState({
     orders: false
   });
+  const [isShippingTableExpanded, setIsShippingTableExpanded] = useState(true);
+  const [isProductSalesTableExpanded, setIsProductSalesTableExpanded] = useState(true);
 
   const [fileInfo, setFileInfo] = useState({
     name: '',
@@ -495,7 +497,16 @@ const App = () => {
         {results.length > 0 && (
           <div className="results-section">
             <div className="results-header">
-              <h2>📊 Self-Ship</h2>
+              <div className="results-title-section">
+                <h2>📊 Self-Ship</h2>
+                <button 
+                  onClick={() => setIsShippingTableExpanded(!isShippingTableExpanded)}
+                  className="toggle-button"
+                  title={isShippingTableExpanded ? 'Collapse table' : 'Expand table'}
+                >
+                  {isShippingTableExpanded ? '🔽' : '▶️'}
+                </button>
+              </div>
               <div className="results-actions">
                 <input
                   type="file"
@@ -551,37 +562,39 @@ const App = () => {
               )}
             </div>
 
-            <div className="table-container">
-              <table className="results-table">
-                <thead>
-                  <tr>
-                    <th>S.No.</th>
-                    <th>Order ID</th>
-                    <th>State</th>
-                    <th>Total Weight (kg)</th>
-                    <th>Rounded Weight (kg)</th>
-                    <th>Rate per kg</th>
-                    <th>Shipping Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((row, index) => (
-                    <tr key={index} className={!row.stateFound ? 'warning-row' : ''}>
-                      <td className="serial-number">{index + 1}</td>
-                      <td>{row.orderId}</td>
-                      <td>
-                        {row.state}
-                        {!row.stateFound && <span className="warning-badge">⚠️</span>}
-                      </td>
-                      <td>{row.totalWeight}</td>
-                      <td>{row.roundedWeight}</td>
-                      <td>₹{row.ratePerKg}</td>
-                      <td>₹{row.shippingCost}</td>
+            {isShippingTableExpanded && (
+              <div className="table-container">
+                <table className="results-table">
+                  <thead>
+                    <tr>
+                      <th>S.No.</th>
+                      <th>Order ID</th>
+                      <th>State</th>
+                      <th>Total Weight (kg)</th>
+                      <th>Rounded Weight (kg)</th>
+                      <th>Rate per kg</th>
+                      <th>Shipping Cost</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {results.map((row, index) => (
+                      <tr key={index} className={!row.stateFound ? 'warning-row' : ''}>
+                        <td className="serial-number">{index + 1}</td>
+                        <td>{row.orderId}</td>
+                        <td>
+                          {row.state}
+                          {!row.stateFound && <span className="warning-badge">⚠️</span>}
+                        </td>
+                        <td>{row.totalWeight}</td>
+                        <td>{row.roundedWeight}</td>
+                        <td>₹{row.ratePerKg}</td>
+                        <td>₹{row.shippingCost}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -589,7 +602,16 @@ const App = () => {
         {productSalesData.length > 0 && (
                     <div className="results-section">
             <div className="results-header">
-              <h2>📈 Product Sales</h2>
+              <div className="results-title-section">
+                <h2>📈 Product Sales</h2>
+                <button 
+                  onClick={() => setIsProductSalesTableExpanded(!isProductSalesTableExpanded)}
+                  className="toggle-button"
+                  title={isProductSalesTableExpanded ? 'Collapse table' : 'Expand table'}
+                >
+                  {isProductSalesTableExpanded ? '🔽' : '▶️'}
+                </button>
+              </div>
               <div className="results-actions">
                 <button onClick={exportProductSales} className="export-button">
                   📥 Export CSV
@@ -629,30 +651,32 @@ const App = () => {
               </div>
             </div>
 
-            <div className="table-container">
-              <table className="results-table">
-                <thead>
-                  <tr>
-                    <th>S.No.</th>
-                    <th>Product Name</th>
-                    <th>Pack of One Sold</th>
-                    <th>Pack of Two Sold</th>
-                    <th>Total Units</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {productSalesData.map((product, index) => (
-                                         <tr key={index}>
-                       <td className="serial-number">{index + 1}</td>
-                       <td>{product.productName}</td>
-                       <td>{product.packOfOneSold}</td>
-                       <td>{product.packOfTwoSold}</td>
-                       <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
-                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        {isProductSalesTableExpanded && (
+              <div className="table-container">
+                <table className="results-table">
+                  <thead>
+                    <tr>
+                      <th>S.No.</th>
+                      <th>Product Name</th>
+                      <th>Pack of One Sold</th>
+                      <th>Pack of Two Sold</th>
+                      <th>Total Units</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productSalesData.map((product, index) => (
+                      <tr key={index}>
+                        <td className="serial-number">{index + 1}</td>
+                        <td>{product.productName}</td>
+                        <td>{product.packOfOneSold}</td>
+                        <td>{product.packOfTwoSold}</td>
+                        <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

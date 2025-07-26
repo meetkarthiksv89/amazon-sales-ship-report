@@ -360,10 +360,41 @@ body {
   margin-bottom: 30px;
 }
 
+.results-title-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .results-header h2 {
   color: #1e293b;
   font-size: 1.8rem;
   font-weight: 700;
+  margin: 0;
+}
+
+.toggle-button {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+}
+
+.toggle-button:hover {
+  background: #e5e7eb;
+  transform: scale(1.05);
+}
+
+.toggle-button:active {
+  transform: scale(0.98);
 }
 
 .results-actions {
@@ -721,6 +752,10 @@ body {
     flex-direction: column;
     align-items: stretch;
     gap: 15px;
+  }
+  
+  .results-title-section {
+    justify-content: center;
   }
   
   .results-header h2 {
