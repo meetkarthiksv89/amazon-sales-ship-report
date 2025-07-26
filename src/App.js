@@ -377,7 +377,7 @@ const App = () => {
           </div>
         )}
 
-        {results.length === 0 ? (
+        {results.length === 0 && (
           <div className="upload-section">
             <div className="upload-container">
               <div className="upload-area">
@@ -445,21 +445,6 @@ const App = () => {
                     </button>
                   )}
                 </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="upload-minimized">
-            <div className="minimized-info">
-              <div className="file-loaded-indicator">
-                <span className="file-icon">📄</span>
-                <div className="file-summary">
-                  <span className="file-count">{orderData.length} orders from {fileInfo.name}</span>
-                  {fileInfo.converted && <span className="mini-conversion-tag">TXT→CSV</span>}
-                </div>
-              </div>
-              <div className="rates-mini">
-                <span className="rates-mini-text">{Object.keys(shippingRates).length} states configured</span>
               </div>
             </div>
           </div>
