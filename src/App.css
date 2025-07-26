@@ -30,7 +30,7 @@ body {
 
 /* Header */
 .header {
-  background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+  background: #241401;
   color: white;
   padding: 32px 40px;
   text-align: center;
@@ -85,8 +85,8 @@ body {
 }
 
 .upload-area:hover {
-  border-color: #4f46e5;
-  background: #fafbff;
+  border-color: #241401;
+  background: #fefefe;
 }
 
 .upload-header {
@@ -126,7 +126,7 @@ body {
 }
 
 .file-upload-label {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  background: #241401;
   color: white;
   padding: 12px 24px;
   border-radius: 8px;
@@ -138,6 +138,7 @@ body {
 }
 
 .file-upload-label:hover {
+  background: #3a2001;
   transform: translateY(-1px);
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
@@ -181,8 +182,8 @@ body {
 }
 
 .conversion-tag {
-  background: #dbeafe;
-  color: #2563eb;
+  background: #f5f2ed;
+  color: #241401;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.7rem;
@@ -225,7 +226,7 @@ body {
 }
 
 .rates-status-text.loaded {
-  color: #059669;
+  color: #241401;
   font-weight: 500;
 }
 
@@ -295,8 +296,8 @@ body {
 }
 
 .mini-conversion-tag {
-  background: #dbeafe;
-  color: #2563eb;
+  background: #f5f2ed;
+  color: #241401;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.65rem;
@@ -323,7 +324,7 @@ body {
 }
 
 .process-button {
-  background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+  background: #241401;
   color: white;
   border: none;
   padding: 14px 28px;
@@ -337,6 +338,7 @@ body {
 }
 
 .process-button:hover:not(:disabled) {
+  background: #3a2001;
   transform: translateY(-2px);
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
@@ -375,7 +377,7 @@ body {
 
 .toggle-button {
   background: #f3f4f6;
-  border: 1px solid #d1d5db;
+  border: 1px solid #241401;
   border-radius: 8px;
   padding: 8px 12px;
   cursor: pointer;
@@ -389,7 +391,8 @@ body {
 }
 
 .toggle-button:hover {
-  background: #e5e7eb;
+  background: #241401;
+  color: white;
   transform: scale(1.05);
 }
 
@@ -404,7 +407,7 @@ body {
 }
 
 .upload-new-button {
-  background: #4f46e5;
+  background: #241401;
   color: white;
   border: none;
   padding: 10px 16px;
@@ -420,12 +423,12 @@ body {
 }
 
 .upload-new-button:hover {
-  background: #4338ca;
+  background: #3a2001;
   transform: translateY(-1px);
 }
 
 .export-button {
-  background: #10b981;
+  background: #241401;
   color: white;
   border: none;
   padding: 10px 16px;
@@ -437,7 +440,7 @@ body {
 }
 
 .export-button:hover {
-  background: #059669;
+  background: #3a2001;
   transform: translateY(-1px);
 }
 
@@ -457,7 +460,7 @@ body {
 }
 
 .results-table th {
-  background: #4f46e5;
+  background: #241401;
   color: white;
   padding: 16px 12px;
   text-align: left;
@@ -535,15 +538,15 @@ body {
 }
 
 .orders-card {
-  border-left: 4px solid #3b82f6;
+  border-left: 4px solid #241401;
 }
 
 .cost-card {
-  border-left: 4px solid #10b981;
+  border-left: 4px solid #241401;
 }
 
 .average-card {
-  border-left: 4px solid #f59e0b;
+  border-left: 4px solid #241401;
 }
 
 .card-icon {
