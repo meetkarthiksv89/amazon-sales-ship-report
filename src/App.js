@@ -290,6 +290,34 @@ const App = () => {
     link.click();
   }, [results]);
 
+  // Export product sales to CSV
+  const exportProductSales = useCallback(() => {
+    if (!productSalesData.length) return;
+
+    const csvContent = Papa.unparse({
+      fields: [
+        'S.No.',
+        'Product Name',
+        'Pack of One Sold',
+        'Pack of Two Sold',
+        'Total Units'
+      ],
+      data: productSalesData.map((product, index) => [
+        index + 1,
+        product.productName,
+        product.packOfOneSold,
+        product.packOfTwoSold,
+        product.packOfOneSold + (product.packOfTwoSold * 2)
+      ])
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'product_sales_results.csv';
+    link.click();
+  }, [productSalesData]);
+
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
 
@@ -559,9 +587,14 @@ const App = () => {
 
         {/* Product Sales by Variant Section */}
         {productSalesData.length > 0 && (
-          <div className="results-section">
+                    <div className="results-section">
             <div className="results-header">
-                             <h2>📈 Product Sales</h2>
+              <h2>📈 Product Sales</h2>
+              <div className="results-actions">
+                <button onClick={exportProductSales} className="export-button">
+                  📥 Export CSV
+                </button>
+              </div>
             </div>
 
             <div className="summary">
