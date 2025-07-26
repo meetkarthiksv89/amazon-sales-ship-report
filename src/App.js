@@ -5,6 +5,7 @@ import './App.css';
 const App = () => {
   const [orderData, setOrderData] = useState([]);
   const [results, setResults] = useState([]);
+  const [productSalesData, setProductSalesData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploadStatus, setUploadStatus] = useState({
@@ -292,6 +293,77 @@ const App = () => {
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
 
+  // Process product sales by variant (excluding cancelled orders)
+  const processProductSalesByVariant = useCallback(() => {
+    if (!orderData.length) return [];
+
+    // Filter out cancelled orders
+    const nonCancelledOrders = orderData.filter(row => {
+      const orderStatus = row['order-status']?.trim().toLowerCase();
+      return orderStatus !== 'cancelled';
+    });
+
+    // Group products by base name and variant
+    const productSales = {};
+
+    nonCancelledOrders.forEach(row => {
+      const productName = row['product-name']?.trim();
+      const quantity = parseInt(row.quantity) || 1;
+
+      if (!productName) return;
+
+      // Determine variant and extract base product name
+      let variant = 'Pack of One'; // Default for uncategorized products
+      let baseName = productName;
+
+      if (/pack of 2/i.test(productName)) {
+        variant = 'Pack of Two';
+        baseName = productName.replace(/pack of 2/gi, '').trim();
+      } else if (/pack of 1/i.test(productName)) {
+        variant = 'Pack of One';
+        baseName = productName.replace(/pack of 1/gi, '').trim();
+      }
+
+      // Clean up base name (remove extra spaces, dashes, parentheses)
+      baseName = baseName.replace(/\s*-\s*$|^\s*-\s*|\s*\(\s*\)\s*$/, '').trim();
+
+      // Initialize product entry if it doesn't exist
+      if (!productSales[baseName]) {
+        productSales[baseName] = {
+          productName: baseName,
+          packOfOneSold: 0,
+          packOfTwoSold: 0
+        };
+      }
+
+      // Add quantity to appropriate variant
+      if (variant === 'Pack of Two') {
+        productSales[baseName].packOfTwoSold += quantity;
+      } else {
+        productSales[baseName].packOfOneSold += quantity;
+      }
+    });
+
+    // Convert to array and sort by total sales (descending)
+    const productSalesArray = Object.values(productSales).sort((a, b) => {
+      const totalA = a.packOfOneSold + a.packOfTwoSold;
+      const totalB = b.packOfOneSold + b.packOfTwoSold;
+      return totalB - totalA;
+    });
+
+    return productSalesArray;
+  }, [orderData]);
+
+  // Update product sales data when order data changes
+  useEffect(() => {
+    if (orderData.length > 0) {
+      const salesData = processProductSalesByVariant();
+      setProductSalesData(salesData);
+    } else {
+      setProductSalesData([]);
+    }
+  }, [orderData, processProductSalesByVariant]);
+
   return (
     <div className="app">
       <div className="container">
@@ -493,6 +565,72 @@ const App = () => {
                       <td>₹{row.ratePerKg}</td>
                       <td>₹{row.shippingCost}</td>
                     </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Product Sales by Variant Section */}
+        {productSalesData.length > 0 && (
+          <div className="results-section">
+            <div className="results-header">
+              <h2>📈 Product Sales by Variant (Excluding Cancelled Orders)</h2>
+            </div>
+
+            <div className="summary">
+              <div className="summary-grid">
+                <div className="summary-card-modern orders-card">
+                  <div className="card-icon">🏷️</div>
+                  <div className="card-content">
+                    <div className="card-value">{productSalesData.length}</div>
+                    <div className="card-label">Unique Products</div>
+                  </div>
+                </div>
+                
+                <div className="summary-card-modern cost-card">
+                  <div className="card-icon">📦</div>
+                  <div className="card-content">
+                    <div className="card-value">
+                      {productSalesData.reduce((sum, product) => sum + product.packOfOneSold, 0)}
+                    </div>
+                    <div className="card-label">Pack of One Units</div>
+                  </div>
+                </div>
+                
+                <div className="summary-card-modern average-card">
+                  <div className="card-icon">📦📦</div>
+                  <div className="card-content">
+                    <div className="card-value">
+                      {productSalesData.reduce((sum, product) => sum + product.packOfTwoSold, 0)}
+                    </div>
+                    <div className="card-label">Pack of Two Units</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="table-container">
+              <table className="results-table">
+                <thead>
+                  <tr>
+                    <th>S.No.</th>
+                    <th>Product Name</th>
+                    <th>Pack of One Sold</th>
+                    <th>Pack of Two Sold</th>
+                    <th>Total Units</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productSalesData.map((product, index) => (
+                                         <tr key={index}>
+                       <td className="serial-number">{index + 1}</td>
+                       <td>{product.productName}</td>
+                       <td>{product.packOfOneSold}</td>
+                       <td>{product.packOfTwoSold}</td>
+                       <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
+                     </tr>
                   ))}
                 </tbody>
               </table>
