@@ -425,6 +425,81 @@ const AppContent = () => {
     }
   };
 
+  // Process product sales by variant (excluding cancelled orders)
+  const processProductSalesByVariant = useCallback(() => {
+    if (!orderData.length) return { productSales: [], shippingRevenue: 0 };
+
+    // Filter out cancelled orders
+    const nonCancelledOrders = orderData.filter(row => {
+      const orderStatus = row['order-status']?.trim().toLowerCase();
+      return orderStatus !== 'cancelled';
+    });
+
+    // Group products by base name and variant
+    const productSales = {};
+    let totalShippingRevenue = 0;
+
+    nonCancelledOrders.forEach(row => {
+      const productName = row['product-name']?.trim();
+      const quantity = parseInt(row.quantity) || 1;
+      const itemPrice = parseFloat(row['item-price']) || 0;
+      const promotionDiscount = parseFloat(row['item-promotion-discount']) || 0;
+      const shippingPrice = parseFloat(row['shipping-price']) || 0;
+
+      // Add to shipping revenue
+      totalShippingRevenue += shippingPrice;
+
+      if (!productName) return;
+
+      // Determine variant and extract base product name
+      let variant = 'Pack of One'; // Default for uncategorized products
+      let baseName = productName;
+
+      if (/pack of 2/i.test(productName)) {
+        variant = 'Pack of Two';
+        baseName = productName.replace(/pack of 2/gi, '').trim();
+      } else if (/pack of 1/i.test(productName)) {
+        variant = 'Pack of One';
+        baseName = productName.replace(/pack of 1/gi, '').trim();
+      }
+
+      // Clean up base name (remove extra spaces, dashes, parentheses)
+      baseName = baseName.replace(/\s*-\s*$|^\s*-\s*|\s*\(\s*\)\s*$/, '').trim();
+
+      // Initialize product entry if it doesn't exist
+      if (!productSales[baseName]) {
+        productSales[baseName] = {
+          productName: baseName,
+          packOfOneSold: 0,
+          packOfTwoSold: 0,
+          totalSales: 0
+        };
+      }
+
+      // Calculate sales amount for this item (net revenue after discounts)
+      const salesAmount = itemPrice - promotionDiscount;
+
+      // Add quantity to appropriate variant
+      if (variant === 'Pack of Two') {
+        productSales[baseName].packOfTwoSold += quantity;
+      } else {
+        productSales[baseName].packOfOneSold += quantity;
+      }
+      
+      // Add to total sales
+      productSales[baseName].totalSales += salesAmount;
+    });
+
+    // Convert to array and sort by total sales (descending)
+    const productSalesArray = Object.values(productSales).sort((a, b) => {
+      const totalA = a.totalSales;
+      const totalB = b.totalSales;
+      return totalB - totalA;
+    });
+
+    return { productSales: productSalesArray, shippingRevenue: totalShippingRevenue };
+  }, [orderData]);
+
   // Process orders and calculate shipping
   const processOrders = useCallback(() => {
     if (!orderData.length) {
@@ -509,7 +584,7 @@ const AppContent = () => {
       setError(`Processing error: ${err.message}`);
       setLoading(false);
     }
-  }, [orderData, shippingRates, ratesLoaded]);
+  }, [orderData, shippingRates, ratesLoaded, processProductSalesByVariant]);
 
   // Export results to CSV
   const exportResults = useCallback(() => {
@@ -547,23 +622,35 @@ const AppContent = () => {
   const exportProductSales = useCallback(() => {
     if (!productSalesData.length) return;
 
+    const fields = [
+      'S.No.',
+      'Product Name',
+      'Pack of One Sold',
+      'Pack of Two Sold',
+      'Total Units'
+    ];
+    
+    if (isAdminMode) {
+      fields.push('Total Sales');
+    }
+
     const csvContent = Papa.unparse({
-      fields: [
-        'S.No.',
-        'Product Name',
-        'Pack of One Sold',
-        'Pack of Two Sold',
-        'Total Units',
-        'Total Sales'
-      ],
-      data: productSalesData.map((product, index) => [
-        index + 1,
-        product.productName,
-        product.packOfOneSold,
-        product.packOfTwoSold,
-        product.packOfOneSold + (product.packOfTwoSold * 2),
-        product.totalSales
-      ])
+      fields: fields,
+      data: productSalesData.map((product, index) => {
+        const row = [
+          index + 1,
+          product.productName,
+          product.packOfOneSold,
+          product.packOfTwoSold,
+          product.packOfOneSold + (product.packOfTwoSold * 2)
+        ];
+        
+        if (isAdminMode) {
+          row.push(product.totalSales);
+        }
+        
+        return row;
+      })
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -571,7 +658,7 @@ const AppContent = () => {
     link.href = URL.createObjectURL(blob);
     link.download = 'product_sales_results.csv';
     link.click();
-  }, [productSalesData]);
+  }, [productSalesData, isAdminMode]);
 
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
@@ -587,80 +674,7 @@ const AppContent = () => {
     setExpandedRows(newExpandedRows);
   };
 
-  // Process product sales by variant (excluding cancelled orders)
-  const processProductSalesByVariant = useCallback(() => {
-    if (!orderData.length) return { productSales: [], shippingRevenue: 0 };
 
-    // Filter out cancelled orders
-    const nonCancelledOrders = orderData.filter(row => {
-      const orderStatus = row['order-status']?.trim().toLowerCase();
-      return orderStatus !== 'cancelled';
-    });
-
-    // Group products by base name and variant
-    const productSales = {};
-    let totalShippingRevenue = 0;
-
-    nonCancelledOrders.forEach(row => {
-      const productName = row['product-name']?.trim();
-      const quantity = parseInt(row.quantity) || 1;
-      const itemPrice = parseFloat(row['item-price']) || 0;
-      const promotionDiscount = parseFloat(row['item-promotion-discount']) || 0;
-      const shippingPrice = parseFloat(row['shipping-price']) || 0;
-
-      // Add to shipping revenue
-      totalShippingRevenue += shippingPrice;
-
-      if (!productName) return;
-
-      // Determine variant and extract base product name
-      let variant = 'Pack of One'; // Default for uncategorized products
-      let baseName = productName;
-
-      if (/pack of 2/i.test(productName)) {
-        variant = 'Pack of Two';
-        baseName = productName.replace(/pack of 2/gi, '').trim();
-      } else if (/pack of 1/i.test(productName)) {
-        variant = 'Pack of One';
-        baseName = productName.replace(/pack of 1/gi, '').trim();
-      }
-
-      // Clean up base name (remove extra spaces, dashes, parentheses)
-      baseName = baseName.replace(/\s*-\s*$|^\s*-\s*|\s*\(\s*\)\s*$/, '').trim();
-
-      // Initialize product entry if it doesn't exist
-      if (!productSales[baseName]) {
-        productSales[baseName] = {
-          productName: baseName,
-          packOfOneSold: 0,
-          packOfTwoSold: 0,
-          totalSales: 0
-        };
-      }
-
-      // Calculate sales amount for this item (net revenue after discounts)
-      const salesAmount = itemPrice - promotionDiscount;
-
-      // Add quantity to appropriate variant
-      if (variant === 'Pack of Two') {
-        productSales[baseName].packOfTwoSold += quantity;
-      } else {
-        productSales[baseName].packOfOneSold += quantity;
-      }
-      
-      // Add to total sales
-      productSales[baseName].totalSales += salesAmount;
-    });
-
-    // Convert to array and sort by total sales (descending)
-    const productSalesArray = Object.values(productSales).sort((a, b) => {
-      const totalA = a.totalSales;
-      const totalB = b.totalSales;
-      return totalB - totalA;
-    });
-
-    return { productSales: productSalesArray, shippingRevenue: totalShippingRevenue };
-  }, [orderData]);
 
   return (
     <div className="app">
@@ -1018,7 +1032,7 @@ const AppContent = () => {
                       <th>Pack of One Sold</th>
                       <th>Pack of Two Sold</th>
                       <th>Total Units</th>
-                      <th>Total Sales</th>
+                      {isAdminMode && <th>Total Sales</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1029,7 +1043,7 @@ const AppContent = () => {
                         <td>{product.packOfOneSold}</td>
                         <td>{product.packOfTwoSold}</td>
                         <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
-                        <td>₹{product.totalSales.toLocaleString()}</td>
+                        {isAdminMode && <td>₹{product.totalSales.toLocaleString()}</td>}
                       </tr>
                     ))}
                   </tbody>
