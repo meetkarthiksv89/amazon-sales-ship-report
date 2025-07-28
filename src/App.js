@@ -1,11 +1,241 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, createContext, useContext } from 'react';
 import Papa from 'papaparse';
 import './App.css';
 
-const App = () => {
+// Admin Context for managing admin state
+const AdminContext = createContext();
+
+// Admin Provider Component
+const AdminProvider = ({ children }) => {
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [featureLocks, setFeatureLocks] = useState({
+    uploadFiles: false,
+    processOrders: false,
+    exportData: false,
+    viewResults: false,
+  });
+
+  // Admin credentials - in a real app, this would be more secure
+  const ADMIN_CREDENTIALS = {
+    username: 'admin',
+    password: 'admin123'
+  };
+
+  const login = (username, password) => {
+    if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+      setIsAdminMode(true);
+      return true;
+    }
+    return false;
+  };
+
+  const logout = () => {
+    setIsAdminMode(false);
+  };
+
+  const toggleFeatureLock = (feature) => {
+    setFeatureLocks(prev => ({
+      ...prev,
+      [feature]: !prev[feature]
+    }));
+  };
+
+  const isFeatureLocked = (feature) => {
+    return featureLocks[feature];
+  };
+
+  return (
+    <AdminContext.Provider value={{
+      isAdminMode,
+      featureLocks,
+      login,
+      logout,
+      toggleFeatureLock,
+      isFeatureLocked
+    }}>
+      {children}
+    </AdminContext.Provider>
+  );
+};
+
+// Hook to use admin context
+const useAdmin = () => {
+  const context = useContext(AdminContext);
+  if (!context) {
+    throw new Error('useAdmin must be used within an AdminProvider');
+  }
+  return context;
+};
+
+// Admin Login Component
+const AdminLogin = () => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [showLogin, setShowLogin] = useState(false);
+  const { isAdminMode, login, logout } = useAdmin();
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    const success = login(username, password);
+    if (success) {
+      setUsername('');
+      setPassword('');
+      setError('');
+      setShowLogin(false);
+    } else {
+      setError('Invalid credentials');
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    setShowLogin(false);
+  };
+
+  if (isAdminMode) {
+    return (
+      <div className="admin-status">
+        <span className="admin-badge">🔐 Admin Mode</span>
+        <button onClick={handleLogout} className="logout-btn">
+          Logout
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin-login-container">
+      {!showLogin ? (
+        <button 
+          onClick={() => setShowLogin(true)} 
+          className="admin-login-trigger"
+          title="Admin Login"
+        >
+          🔐
+        </button>
+      ) : (
+        <div className="admin-login-form">
+          <form onSubmit={handleLogin}>
+            <div className="form-row">
+              <input
+                type="text"
+                placeholder="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="admin-input"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="admin-input"
+                required
+              />
+              <button type="submit" className="admin-login-btn">
+                Login
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setShowLogin(false)}
+                className="admin-cancel-btn"
+              >
+                ✕
+              </button>
+            </div>
+            {error && <div className="admin-error">{error}</div>}
+          </form>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Admin Panel Component
+const AdminPanel = () => {
+  const { isAdminMode, featureLocks, toggleFeatureLock } = useAdmin();
+
+  if (!isAdminMode) return null;
+
+  return (
+    <div className="admin-panel">
+      <h3>🛠️ Admin Panel - Feature Locks</h3>
+      <div className="feature-locks">
+        <div className="lock-item">
+          <label>
+            <input
+              type="checkbox"
+              checked={featureLocks.uploadFiles}
+              onChange={() => toggleFeatureLock('uploadFiles')}
+            />
+            Lock File Upload
+          </label>
+        </div>
+        <div className="lock-item">
+          <label>
+            <input
+              type="checkbox"
+              checked={featureLocks.processOrders}
+              onChange={() => toggleFeatureLock('processOrders')}
+            />
+            Lock Order Processing
+          </label>
+        </div>
+        <div className="lock-item">
+          <label>
+            <input
+              type="checkbox"
+              checked={featureLocks.exportData}
+              onChange={() => toggleFeatureLock('exportData')}
+            />
+            Lock Data Export
+          </label>
+        </div>
+        <div className="lock-item">
+          <label>
+            <input
+              type="checkbox"
+              checked={featureLocks.viewResults}
+              onChange={() => toggleFeatureLock('viewResults')}
+            />
+            Lock Results View
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Feature Lock Component
+const FeatureLocked = ({ feature, children }) => {
+  const { isFeatureLocked } = useAdmin();
+
+  if (isFeatureLocked(feature)) {
+    return (
+      <div className="feature-locked">
+        <div className="locked-overlay">
+          <div className="locked-message">
+            🔒 This feature is currently locked
+          </div>
+        </div>
+        <div className="locked-content">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  return children;
+};
+
+// Main App Component
+const AppContent = () => {
   const [orderData, setOrderData] = useState([]);
   const [results, setResults] = useState([]);
   const [productSalesData, setProductSalesData] = useState([]);
+  const [shippingRevenue, setShippingRevenue] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploadStatus, setUploadStatus] = useState({
@@ -24,6 +254,9 @@ const App = () => {
   const [ratesLoaded, setRatesLoaded] = useState(false);
 
   const DEFAULT_RATE = 60; // Default rate per kg if state not found
+  
+  // Use admin context
+  const { isFeatureLocked, isAdminMode } = useAdmin();
 
 
 
@@ -170,6 +403,7 @@ const App = () => {
       setUploadStatus(prev => ({ ...prev, orders: true }));
       setResults([]); // Clear previous results when new file is uploaded
       setProductSalesData([]); // Clear previous product sales data when new file is uploaded
+      setShippingRevenue(0); // Clear previous shipping revenue when new file is uploaded
       setLoading(false);
     });
   }, [parseFile]);
@@ -178,9 +412,17 @@ const App = () => {
 
   // Extract pack information from product name
   const extractPackInfo = (productName) => {
-    const packOfOne = /Pack of 1/i.test(productName) ? 1 : 0;
-    const packOfTwo = /Pack of 2/i.test(productName) ? 1 : 0;
-    return { packOfOne, packOfTwo };
+    const hasPackOfOne = /Pack of 1/i.test(productName);
+    const hasPackOfTwo = /Pack of 2/i.test(productName);
+    
+    if (hasPackOfTwo) {
+      return { packOfOne: 0, packOfTwo: 1 };
+    } else if (hasPackOfOne) {
+      return { packOfOne: 1, packOfTwo: 0 };
+    } else {
+      // Default: treat as single pack if no specific pack mention is found
+      return { packOfOne: 1, packOfTwo: 0 };
+    }
   };
 
   // Process orders and calculate shipping
@@ -257,9 +499,10 @@ const App = () => {
 
       setResults(processedResults);
       
-      // Calculate product sales data
-      const salesData = processProductSalesByVariant();
-      setProductSalesData(salesData);
+      // Calculate product sales data and shipping revenue
+      const { productSales, shippingRevenue: totalShippingRevenue } = processProductSalesByVariant();
+      setProductSalesData(productSales);
+      setShippingRevenue(totalShippingRevenue);
       
       setLoading(false);
     } catch (err) {
@@ -310,14 +553,16 @@ const App = () => {
         'Product Name',
         'Pack of One Sold',
         'Pack of Two Sold',
-        'Total Units'
+        'Total Units',
+        'Total Sales'
       ],
       data: productSalesData.map((product, index) => [
         index + 1,
         product.productName,
         product.packOfOneSold,
         product.packOfTwoSold,
-        product.packOfOneSold + (product.packOfTwoSold * 2)
+        product.packOfOneSold + (product.packOfTwoSold * 2),
+        product.totalSales
       ])
     });
 
@@ -344,7 +589,7 @@ const App = () => {
 
   // Process product sales by variant (excluding cancelled orders)
   const processProductSalesByVariant = useCallback(() => {
-    if (!orderData.length) return [];
+    if (!orderData.length) return { productSales: [], shippingRevenue: 0 };
 
     // Filter out cancelled orders
     const nonCancelledOrders = orderData.filter(row => {
@@ -354,10 +599,17 @@ const App = () => {
 
     // Group products by base name and variant
     const productSales = {};
+    let totalShippingRevenue = 0;
 
     nonCancelledOrders.forEach(row => {
       const productName = row['product-name']?.trim();
       const quantity = parseInt(row.quantity) || 1;
+      const itemPrice = parseFloat(row['item-price']) || 0;
+      const promotionDiscount = parseFloat(row['item-promotion-discount']) || 0;
+      const shippingPrice = parseFloat(row['shipping-price']) || 0;
+
+      // Add to shipping revenue
+      totalShippingRevenue += shippingPrice;
 
       if (!productName) return;
 
@@ -381,9 +633,13 @@ const App = () => {
         productSales[baseName] = {
           productName: baseName,
           packOfOneSold: 0,
-          packOfTwoSold: 0
+          packOfTwoSold: 0,
+          totalSales: 0
         };
       }
+
+      // Calculate sales amount for this item (net revenue after discounts)
+      const salesAmount = itemPrice - promotionDiscount;
 
       // Add quantity to appropriate variant
       if (variant === 'Pack of Two') {
@@ -391,16 +647,19 @@ const App = () => {
       } else {
         productSales[baseName].packOfOneSold += quantity;
       }
+      
+      // Add to total sales
+      productSales[baseName].totalSales += salesAmount;
     });
 
     // Convert to array and sort by total sales (descending)
     const productSalesArray = Object.values(productSales).sort((a, b) => {
-      const totalA = a.packOfOneSold + a.packOfTwoSold;
-      const totalB = b.packOfOneSold + b.packOfTwoSold;
+      const totalA = a.totalSales;
+      const totalB = b.totalSales;
       return totalB - totalA;
     });
 
-    return productSalesArray;
+    return { productSales: productSalesArray, shippingRevenue: totalShippingRevenue };
   }, [orderData]);
 
   return (
@@ -408,7 +667,10 @@ const App = () => {
       <div className="container">
         <header className="header">
           <h1>🚚 Amazon Report</h1>
+          <AdminLogin />
         </header>
+
+        <AdminPanel />
 
         {error && (
           <div className="error-message">
@@ -417,29 +679,30 @@ const App = () => {
         )}
 
         {results.length === 0 && (
-          <div className="upload-section">
-            <div className="upload-container">
-              <div className="upload-area">
-                <div className="upload-header">
-                  <div className="upload-icon">📁</div>
-                  <div className="upload-text">
-                    <h3>Upload Order Report</h3>
-                    <p>Drop your Amazon order file here or click to browse</p>
-                    <span className="supported-formats">Supports TXT & CSV formats</span>
+          <FeatureLocked feature="uploadFiles">
+            <div className="upload-section">
+              <div className="upload-container">
+                <div className="upload-area">
+                  <div className="upload-header">
+                    <div className="upload-icon">📁</div>
+                    <div className="upload-text">
+                      <h3>Upload Order Report</h3>
+                      <p>Drop your Amazon order file here or click to browse</p>
+                      <span className="supported-formats">Supports TXT & CSV formats</span>
+                    </div>
                   </div>
-                </div>
-                
-                <input
-                  type="file"
-                  accept=".txt,.csv"
-                  onChange={handleOrderUpload}
-                  disabled={loading}
-                  className="file-input-hidden"
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload" className="file-upload-label">
-                  Choose File
-                </label>
+                  
+                  <input
+                    type="file"
+                    accept=".txt,.csv"
+                    onChange={handleOrderUpload}
+                    disabled={loading || isFeatureLocked('uploadFiles')}
+                    className="file-input-hidden"
+                    id="file-upload"
+                  />
+                  <label htmlFor="file-upload" className="file-upload-label">
+                    Choose File
+                  </label>
 
                 {uploadStatus.orders && orderData.length > 0 && (
                   <div className="upload-success">
@@ -487,24 +750,28 @@ const App = () => {
               </div>
             </div>
           </div>
+          </FeatureLocked>
         )}
 
         {results.length === 0 && (
-          <div className="action-section">
-            <button
-              onClick={processOrders}
-              disabled={!uploadStatus.orders || !ratesLoaded || loading}
-              className="process-button"
-            >
-              {loading ? '⏳ Processing...' : 
-               !ratesLoaded ? '⏳ Loading Rates...' : 
-               '📊 Generate Report'}
-            </button>
-          </div>
+          <FeatureLocked feature="processOrders">
+            <div className="action-section">
+              <button
+                onClick={processOrders}
+                disabled={!uploadStatus.orders || !ratesLoaded || loading || isFeatureLocked('processOrders')}
+                className="process-button"
+              >
+                {loading ? '⏳ Processing...' : 
+                 !ratesLoaded ? '⏳ Loading Rates...' : 
+                 '📊 Generate Report'}
+              </button>
+            </div>
+          </FeatureLocked>
         )}
 
         {results.length > 0 && (
-          <div className="results-section">
+          <FeatureLocked feature="viewResults">
+            <div className="results-section">
             <div className="results-header">
               <div className="results-title-section">
                 <h2>📊 Self-Ship</h2>
@@ -528,9 +795,15 @@ const App = () => {
                 <label htmlFor="new-file-upload" className="upload-new-button">
                   📁 Upload New File
                 </label>
-                <button onClick={exportResults} className="export-button">
-                  📥 Export CSV
-                </button>
+                <FeatureLocked feature="exportData">
+                  <button 
+                    onClick={exportResults} 
+                    className="export-button"
+                    disabled={isFeatureLocked('exportData')}
+                  >
+                    📥 Export CSV
+                  </button>
+                </FeatureLocked>
               </div>
             </div>
 
@@ -648,11 +921,13 @@ const App = () => {
               </div>
             )}
           </div>
+          </FeatureLocked>
         )}
 
         {/* Product Sales by Variant Section */}
         {results.length > 0 && productSalesData.length > 0 && (
-                    <div className="results-section">
+          <FeatureLocked feature="viewResults">
+            <div className="results-section">
             <div className="results-header">
               <div className="results-title-section">
                 <h2>📈 Product Sales</h2>
@@ -665,9 +940,15 @@ const App = () => {
                 </button>
               </div>
               <div className="results-actions">
-                <button onClick={exportProductSales} className="export-button">
-                  📥 Export CSV
-                </button>
+                <FeatureLocked feature="exportData">
+                  <button 
+                    onClick={exportProductSales} 
+                    className="export-button"
+                    disabled={isFeatureLocked('exportData')}
+                  >
+                    📥 Export CSV
+                  </button>
+                </FeatureLocked>
               </div>
             </div>
 
@@ -700,6 +981,30 @@ const App = () => {
                     <div className="card-label">Pack of Two Units</div>
                   </div>
                 </div>
+
+                {isAdminMode && (
+                  <>
+                    <div className="summary-card-modern revenue-card">
+                      <div className="card-icon">💰</div>
+                      <div className="card-content">
+                        <div className="card-value">
+                          ₹{productSalesData.reduce((sum, product) => sum + product.totalSales, 0).toLocaleString()}
+                        </div>
+                        <div className="card-label">Total Revenue</div>
+                      </div>
+                    </div>
+
+                    <div className="summary-card-modern cost-card">
+                      <div className="card-icon">🚚</div>
+                      <div className="card-content">
+                        <div className="card-value">
+                          ₹{shippingRevenue.toLocaleString()}
+                        </div>
+                        <div className="card-label">Shipping Revenue</div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -713,6 +1018,7 @@ const App = () => {
                       <th>Pack of One Sold</th>
                       <th>Pack of Two Sold</th>
                       <th>Total Units</th>
+                      <th>Total Sales</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -723,6 +1029,7 @@ const App = () => {
                         <td>{product.packOfOneSold}</td>
                         <td>{product.packOfTwoSold}</td>
                         <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
+                        <td>₹{product.totalSales.toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -730,6 +1037,7 @@ const App = () => {
               </div>
             )}
           </div>
+          </FeatureLocked>
         )}
 
         <footer className="footer">
@@ -737,6 +1045,15 @@ const App = () => {
         </footer>
       </div>
     </div>
+  );
+};
+
+// Main App Component with Admin Provider
+const App = () => {
+  return (
+    <AdminProvider>
+      <AppContent />
+    </AdminProvider>
   );
 };
 
