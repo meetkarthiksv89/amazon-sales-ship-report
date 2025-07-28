@@ -13,6 +13,7 @@ const App = () => {
   });
   const [isShippingTableExpanded, setIsShippingTableExpanded] = useState(true);
   const [isProductSalesTableExpanded, setIsProductSalesTableExpanded] = useState(true);
+  const [expandedRows, setExpandedRows] = useState(new Set());
 
   const [fileInfo, setFileInfo] = useState({
     name: '',
@@ -168,6 +169,7 @@ const App = () => {
       setOrderData(data);
       setUploadStatus(prev => ({ ...prev, orders: true }));
       setResults([]); // Clear previous results when new file is uploaded
+      setProductSalesData([]); // Clear previous product sales data when new file is uploaded
       setLoading(false);
     });
   }, [parseFile]);
@@ -248,11 +250,17 @@ const App = () => {
           roundedWeight,
           ratePerKg: rate,
           shippingCost,
-          stateFound: !!shippingRates[order.state]
+          stateFound: !!shippingRates[order.state],
+          items: order.items
         };
       });
 
       setResults(processedResults);
+      
+      // Calculate product sales data
+      const salesData = processProductSalesByVariant();
+      setProductSalesData(salesData);
+      
       setLoading(false);
     } catch (err) {
       setError(`Processing error: ${err.message}`);
@@ -323,6 +331,17 @@ const App = () => {
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
 
+  // Toggle row expansion
+  const toggleRowExpansion = (orderId) => {
+    const newExpandedRows = new Set(expandedRows);
+    if (newExpandedRows.has(orderId)) {
+      newExpandedRows.delete(orderId);
+    } else {
+      newExpandedRows.add(orderId);
+    }
+    setExpandedRows(newExpandedRows);
+  };
+
   // Process product sales by variant (excluding cancelled orders)
   const processProductSalesByVariant = useCallback(() => {
     if (!orderData.length) return [];
@@ -383,16 +402,6 @@ const App = () => {
 
     return productSalesArray;
   }, [orderData]);
-
-  // Update product sales data when order data changes
-  useEffect(() => {
-    if (orderData.length > 0) {
-      const salesData = processProductSalesByVariant();
-      setProductSalesData(salesData);
-    } else {
-      setProductSalesData([]);
-    }
-  }, [orderData, processProductSalesByVariant]);
 
   return (
     <div className="app">
@@ -567,6 +576,7 @@ const App = () => {
                 <table className="results-table">
                   <thead>
                     <tr>
+                      <th>Details</th>
                       <th>S.No.</th>
                       <th>Order ID</th>
                       <th>State</th>
@@ -577,20 +587,62 @@ const App = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((row, index) => (
-                      <tr key={index} className={!row.stateFound ? 'warning-row' : ''}>
-                        <td className="serial-number">{index + 1}</td>
-                        <td>{row.orderId}</td>
-                        <td>
-                          {row.state}
-                          {!row.stateFound && <span className="warning-badge">⚠️</span>}
-                        </td>
-                        <td>{row.totalWeight}</td>
-                        <td>{row.roundedWeight}</td>
-                        <td>₹{row.ratePerKg}</td>
-                        <td>₹{row.shippingCost}</td>
-                      </tr>
-                    ))}
+                    {results.map((row, index) => {
+                      const isExpanded = expandedRows.has(row.orderId);
+                      
+                      return (
+                        <React.Fragment key={row.orderId}>
+                          <tr 
+                            className={!row.stateFound ? 'warning-row' : ''}
+                            onClick={() => toggleRowExpansion(row.orderId)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td>
+                              <button 
+                                className="expand-button"
+                                title={isExpanded ? 'Collapse details' : 'Expand details'}
+                              >
+                                {isExpanded ? '🔽' : '▶️'}
+                              </button>
+                            </td>
+                            <td className="serial-number">{index + 1}</td>
+                            <td>{row.orderId}</td>
+                            <td>
+                              {row.state}
+                              {!row.stateFound && <span className="warning-badge">⚠️</span>}
+                            </td>
+                            <td>{row.totalWeight}</td>
+                            <td>{row.roundedWeight}</td>
+                            <td>₹{row.ratePerKg}</td>
+                            <td>₹{row.shippingCost}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="expanded-row">
+                              <td colSpan="8">
+                                <div className="product-table">
+                                  <div className="product-header">
+                                    <div className="product-header-name">Product Name</div>
+                                    <div className="product-header-qty">Qty</div>
+                                  </div>
+                                  <div className="product-list">
+                                    {row.items.map((item, itemIndex) => (
+                                      <div key={itemIndex} className="product-item">
+                                        <div className="product-name">{item.productName}</div>
+                                        <div className="product-divider"></div>
+                                        <div className="product-quantity">{item.quantity}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="expanded-footer">
+                                  <span className="total-units">Total Units: {row.packOfOne + row.packOfTwo * 2}</span>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -599,7 +651,7 @@ const App = () => {
         )}
 
         {/* Product Sales by Variant Section */}
-        {productSalesData.length > 0 && (
+        {results.length > 0 && productSalesData.length > 0 && (
                     <div className="results-section">
             <div className="results-header">
               <div className="results-title-section">

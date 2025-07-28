@@ -453,58 +453,65 @@ body {
   margin-bottom: 30px;
 }
 
+/* Table Styling - Shopify-inspired */
 .results-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  background: #ffffff;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e1e3e5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.results-table th {
-  background: #241401;
-  color: white;
-  padding: 16px 12px;
-  text-align: left;
+.results-table thead th {
+  background: #fafbfc;
+  color: #202223;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.025em;
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #e1e3e5;
 }
 
-.results-table th:first-child {
-  text-align: center;
-  width: 60px;
-  min-width: 60px;
+.results-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f1f1;
+  color: #202223;
+  font-size: 13px;
+  vertical-align: middle;
 }
 
-.results-table td {
-  padding: 12px;
-  border-bottom: 1px solid #e2e8f0;
-  color: #374151;
+.results-table tbody tr:hover {
+  background-color: #f6f6f7;
+}
+
+.results-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.results-table tbody tr {
+  transition: background-color 0.15s ease;
 }
 
 .serial-number {
-  text-align: center;
-  font-weight: 600;
-  background: #f8fafc;
-  color: #64748b;
+  color: #6b7280;
+  font-weight: 500;
   width: 60px;
-  min-width: 60px;
-}
-
-.results-table tr:hover {
-  background: #f8fafc;
 }
 
 .warning-row {
-  background: #fef9e7 !important;
+  background-color: #fffbeb;
 }
 
 .warning-row:hover {
-  background: #fef7cd !important;
+  background-color: #fef3c7 !important;
 }
 
 .warning-badge {
-  margin-left: 8px;
+  margin-left: 6px;
   font-size: 12px;
 }
 
@@ -610,6 +617,142 @@ body {
   border: 1px solid #e2e8f0;
 }
 
+/* Expand Button and Expanded Content - Shopify-inspired */
+.expand-button {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #6b7280;
+  pointer-events: none;
+}
+
+.expand-button:hover {
+  background-color: #f9fafb;
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+.expand-button:active {
+  background-color: #f3f4f6;
+  transform: scale(0.98);
+}
+
+.expanded-row {
+  background-color: #faf6f0 !important;
+}
+
+.expanded-row:hover {
+  background-color: #faf6f0 !important;
+}
+
+.expanded-row td {
+  padding: 16px;
+}
+
+.product-table {
+  margin-bottom: 12px;
+}
+
+.product-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #f1f1f1;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid #e1e3e5;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.product-header-name {
+  flex: 1;
+  margin-right: 12px;
+}
+
+.product-header-qty {
+  width: 60px;
+  text-align: center;
+}
+
+.product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.product-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  background-color: #ffffff;
+  border: 1px solid #e1e3e5;
+  border-top: none;
+  transition: all 0.15s ease;
+}
+
+.product-item:last-child {
+  border-radius: 0 0 6px 6px;
+}
+
+.product-item:hover {
+  background-color: #f9fafb;
+  border-color: #d2d5da;
+}
+
+.product-name {
+  flex: 1;
+  color: #202223;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-right: 12px;
+  font-weight: 400;
+}
+
+.product-divider {
+  width: 1px;
+  height: 20px;
+  background-color: #e1e3e5;
+  margin: 0 12px;
+}
+
+.product-quantity {
+  color: #202223;
+  font-size: 13px;
+  font-weight: 500;
+  width: 60px;
+  text-align: center;
+}
+
+.expanded-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-top: 8px;
+}
+
+.total-units {
+  background-color: #f6f6f7;
+  color: #202223;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #e1e3e5;
+}
+
+/* Processing Information */
 .processing-info h4 {
   color: #1e293b;
   font-size: 1.1rem;
