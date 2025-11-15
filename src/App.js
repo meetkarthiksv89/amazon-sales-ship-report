@@ -520,7 +520,7 @@ const AppContent = () => {
       // Filter for shipped orders only
       const shippedOrders = orderData.filter(row => {
         const orderStatus = row['order-status']?.trim().toLowerCase();
-        return orderStatus === 'shipped';
+        return orderStatus && orderStatus.includes('shipped');
       });
 
 
