@@ -2,6 +2,15 @@ import React, { useState, useCallback, useEffect, createContext, useContext } fr
 import Papa from 'papaparse';
 import './App.css';
 
+// Allowed states for shipping calculation
+const ALLOWED_STATES = [
+  'KARNATAKA',
+  'ANDHRA PRADESH',
+  'TELANGANA',
+  'TAMIL NADU',
+  'KERALA'
+];
+
 // Admin Context for managing admin state
 const AdminContext = createContext();
 
@@ -254,15 +263,6 @@ const AppContent = () => {
   const [ratesLoaded, setRatesLoaded] = useState(false);
 
   const DEFAULT_RATE = 60; // Default rate per kg if state not found
-  
-  // Allowed states for shipping calculation
-  const ALLOWED_STATES = [
-    'KARNATAKA',
-    'ANDHRA PRADESH',
-    'TELANGANA',
-    'TAMIL NADU',
-    'KERALA'
-  ];
   
   // Use admin context
   const { isFeatureLocked, isAdminMode } = useAdmin();
