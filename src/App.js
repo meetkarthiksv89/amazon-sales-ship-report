@@ -255,6 +255,15 @@ const AppContent = () => {
 
   const DEFAULT_RATE = 60; // Default rate per kg if state not found
   
+  // Allowed states for shipping calculation
+  const ALLOWED_STATES = [
+    'KARNATAKA',
+    'ANDHRA PRADESH',
+    'TELANGANA',
+    'TAMIL NADU',
+    'KERALA'
+  ];
+  
   // Use admin context
   const { isFeatureLocked, isAdminMode } = useAdmin();
 
@@ -523,11 +532,22 @@ const AppContent = () => {
         return orderStatus && orderStatus.includes('shipped');
       });
 
+      // Filter for allowed states only
+      const allowedStateOrders = shippedOrders.filter(row => {
+        const state = row['ship-state']?.trim().toUpperCase();
+        return state && ALLOWED_STATES.includes(state);
+      });
 
+      // Log filtering information
+      if (shippedOrders.length > allowedStateOrders.length) {
+        const filteredCount = shippedOrders.length - allowedStateOrders.length;
+        console.log(`Filtered out ${filteredCount} orders from states not in the allowed list.`);
+        console.log(`Processing ${allowedStateOrders.length} orders from allowed states: ${ALLOWED_STATES.join(', ')}`);
+      }
 
       // Group orders by Order ID
       const orderGroups = {};
-      shippedOrders.forEach(row => {
+      allowedStateOrders.forEach(row => {
         const orderId = row['amazon-order-id']?.trim();
         const productName = row['product-name']?.trim();
         const quantity = parseInt(row.quantity) || 1;
