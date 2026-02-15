@@ -1016,6 +1016,16 @@ const AppContent = () => {
                   </div>
                 </div>
 
+                <div className="summary-card-modern">
+                  <div className="card-icon">📊</div>
+                  <div className="card-content">
+                    <div className="card-value">
+                      {productSalesData.reduce((sum, product) => sum + product.packOfOneSold + (product.packOfTwoSold * 2), 0)}
+                    </div>
+                    <div className="card-label">Total Units</div>
+                  </div>
+                </div>
+
                 {isAdminMode && (
                   <>
                     <div className="summary-card-modern revenue-card">
