@@ -676,10 +676,13 @@ const AppContent = () => {
 
     const fields = ['Rank', 'Product Name', 'Pack of One Sold', 'Pack of Two Sold', 'Total Units'];
     if (isAdminMode) fields.push('Revenue');
+    fields.push('% of Total');
 
+    const totalRevenue = productSalesData.reduce((sum, p) => sum + p.totalSales, 0);
     const csvContent = Papa.unparse({
       fields,
       data: topProducts.map((product, index) => {
+        const pct = totalRevenue > 0 ? ((product.totalSales / totalRevenue) * 100).toFixed(1) + '%' : '0%';
         const row = [
           index + 1,
           product.productName,
@@ -688,6 +691,7 @@ const AppContent = () => {
           product.packOfOneSold + (product.packOfTwoSold * 2)
         ];
         if (isAdminMode) row.push(product.totalSales);
+        row.push(pct);
         return row;
       })
     });
@@ -1271,19 +1275,27 @@ const AppContent = () => {
                         <th>Pack of Two</th>
                         <th>Total Units</th>
                         {isAdminMode && <th>Revenue</th>}
+                        <th>% of Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {productSalesData.slice(0, TOP_PRODUCTS_COUNT).map((product, index) => (
-                        <tr key={index}>
-                          <td className="serial-number">{index + 1}</td>
-                          <td>{product.productName}</td>
-                          <td>{product.packOfOneSold}</td>
-                          <td>{product.packOfTwoSold}</td>
-                          <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
-                          {isAdminMode && <td>₹{product.totalSales.toLocaleString()}</td>}
-                        </tr>
-                      ))}
+                      {(() => {
+                        const totalRevenue = productSalesData.reduce((sum, p) => sum + p.totalSales, 0);
+                        return productSalesData.slice(0, TOP_PRODUCTS_COUNT).map((product, index) => {
+                          const pct = totalRevenue > 0 ? ((product.totalSales / totalRevenue) * 100).toFixed(1) : '0';
+                          return (
+                            <tr key={index}>
+                              <td className="serial-number">{index + 1}</td>
+                              <td>{product.productName}</td>
+                              <td>{product.packOfOneSold}</td>
+                              <td>{product.packOfTwoSold}</td>
+                              <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
+                              {isAdminMode && <td>₹{product.totalSales.toLocaleString()}</td>}
+                              <td>{pct}%</td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
