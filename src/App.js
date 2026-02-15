@@ -245,6 +245,7 @@ const AppContent = () => {
   const [results, setResults] = useState([]);
   const [productSalesData, setProductSalesData] = useState([]);
   const [shippingRevenue, setShippingRevenue] = useState(0);
+  const [revenueByStateData, setRevenueByStateData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploadStatus, setUploadStatus] = useState({
@@ -252,6 +253,8 @@ const AppContent = () => {
   });
   const [isShippingTableExpanded, setIsShippingTableExpanded] = useState(true);
   const [isProductSalesTableExpanded, setIsProductSalesTableExpanded] = useState(true);
+  const [isRevenueByStateExpanded, setIsRevenueByStateExpanded] = useState(true);
+  const [isTopProductsExpanded, setIsTopProductsExpanded] = useState(true);
   const [expandedRows, setExpandedRows] = useState(new Set());
 
   const [fileInfo, setFileInfo] = useState({
@@ -263,7 +266,8 @@ const AppContent = () => {
   const [ratesLoaded, setRatesLoaded] = useState(false);
 
   const DEFAULT_RATE = 60; // Default rate per kg if state not found
-  
+  const TOP_PRODUCTS_COUNT = 5;
+
   // Use admin context
   const { isFeatureLocked, isAdminMode } = useAdmin();
 
@@ -413,6 +417,7 @@ const AppContent = () => {
       setResults([]); // Clear previous results when new file is uploaded
       setProductSalesData([]); // Clear previous product sales data when new file is uploaded
       setShippingRevenue(0); // Clear previous shipping revenue when new file is uploaded
+      setRevenueByStateData([]); // Clear previous revenue by state when new file is uploaded
       setLoading(false);
     });
   }, [parseFile]);
@@ -447,6 +452,7 @@ const AppContent = () => {
     // Group products by base name and variant
     const productSales = {};
     let totalShippingRevenue = 0;
+    const revenueByState = {};
 
     nonCancelledOrders.forEach(row => {
       const productName = row['product-name']?.trim();
@@ -457,6 +463,17 @@ const AppContent = () => {
 
       // Add to shipping revenue
       totalShippingRevenue += shippingPrice;
+
+      // Add to revenue by state
+      const state = row['ship-state']?.trim().toUpperCase();
+      const orderId = row['amazon-order-id']?.trim();
+      if (state) {
+        if (!revenueByState[state]) {
+          revenueByState[state] = { state, revenue: 0, orderIds: new Set() };
+        }
+        revenueByState[state].revenue += itemPrice - promotionDiscount;
+        if (orderId) revenueByState[state].orderIds.add(orderId);
+      }
 
       if (!productName) return;
 
@@ -506,7 +523,20 @@ const AppContent = () => {
       return totalB - totalA;
     });
 
-    return { productSales: productSalesArray, shippingRevenue: totalShippingRevenue };
+    // Convert revenue by state to array and sort by revenue (descending)
+    const revenueByStateArray = Object.values(revenueByState)
+      .map(({ state, revenue, orderIds }) => ({
+        state,
+        revenue,
+        orderCount: orderIds.size
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    return {
+      productSales: productSalesArray,
+      shippingRevenue: totalShippingRevenue,
+      revenueByState: revenueByStateArray
+    };
   }, [orderData]);
 
   // Process orders and calculate shipping
@@ -594,10 +624,11 @@ const AppContent = () => {
 
       setResults(processedResults);
       
-      // Calculate product sales data and shipping revenue
-      const { productSales, shippingRevenue: totalShippingRevenue } = processProductSalesByVariant();
+      // Calculate product sales data, shipping revenue, and revenue by state
+      const { productSales, shippingRevenue: totalShippingRevenue, revenueByState } = processProductSalesByVariant();
       setProductSalesData(productSales);
       setShippingRevenue(totalShippingRevenue);
+      setRevenueByStateData(revenueByState);
       
       setLoading(false);
     } catch (err) {
@@ -637,6 +668,36 @@ const AppContent = () => {
     link.download = 'shipping_calculation_results.csv';
     link.click();
   }, [results]);
+
+  // Export top products by revenue to CSV
+  const exportTopProducts = useCallback(() => {
+    const topProducts = productSalesData.slice(0, TOP_PRODUCTS_COUNT);
+    if (!topProducts.length) return;
+
+    const fields = ['Rank', 'Product Name', 'Pack of One Sold', 'Pack of Two Sold', 'Total Units'];
+    if (isAdminMode) fields.push('Revenue');
+
+    const csvContent = Papa.unparse({
+      fields,
+      data: topProducts.map((product, index) => {
+        const row = [
+          index + 1,
+          product.productName,
+          product.packOfOneSold,
+          product.packOfTwoSold,
+          product.packOfOneSold + (product.packOfTwoSold * 2)
+        ];
+        if (isAdminMode) row.push(product.totalSales);
+        return row;
+      })
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'top_products_by_revenue.csv';
+    link.click();
+  }, [productSalesData, isAdminMode]);
 
   // Export product sales to CSV
   const exportProductSales = useCallback(() => {
@@ -679,6 +740,29 @@ const AppContent = () => {
     link.download = 'product_sales_results.csv';
     link.click();
   }, [productSalesData, isAdminMode]);
+
+  // Export revenue by state to CSV
+  const exportRevenueByState = useCallback(() => {
+    if (!revenueByStateData.length) return;
+
+    const totalRevenue = revenueByStateData.reduce((sum, row) => sum + row.revenue, 0);
+    const csvContent = Papa.unparse({
+      fields: ['S.No.', 'State', 'Revenue', '% of Total', 'Orders'],
+      data: revenueByStateData.map((row, index) => [
+        index + 1,
+        row.state,
+        row.revenue.toFixed(2),
+        totalRevenue > 0 ? ((row.revenue / totalRevenue) * 100).toFixed(1) + '%' : '0%',
+        row.orderCount
+      ])
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'revenue_by_state.csv';
+    link.click();
+  }, [revenueByStateData]);
 
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
@@ -1081,6 +1165,130 @@ const AppContent = () => {
               </div>
             )}
           </div>
+          </FeatureLocked>
+        )}
+
+        {/* Revenue by State Section - Admin only */}
+        {results.length > 0 && revenueByStateData.length > 0 && isAdminMode && (
+          <FeatureLocked feature="viewResults">
+            <div className="results-section">
+              <div className="results-header">
+                <div className="results-title-section">
+                  <h2>🗺️ Revenue by State</h2>
+                  <button
+                    onClick={() => setIsRevenueByStateExpanded(!isRevenueByStateExpanded)}
+                    className="toggle-button"
+                    title={isRevenueByStateExpanded ? 'Collapse table' : 'Expand table'}
+                  >
+                    {isRevenueByStateExpanded ? '🔽' : '▶️'}
+                  </button>
+                </div>
+                <div className="results-actions">
+                  <FeatureLocked feature="exportData">
+                    <button
+                      onClick={exportRevenueByState}
+                      className="export-button"
+                      disabled={isFeatureLocked('exportData')}
+                    >
+                      📥 Export CSV
+                    </button>
+                  </FeatureLocked>
+                </div>
+              </div>
+
+              {isRevenueByStateExpanded && (
+                <div className="table-container">
+                  <table className="results-table">
+                    <thead>
+                      <tr>
+                        <th>S.No.</th>
+                        <th>State</th>
+                        <th>Revenue</th>
+                        <th>% of Total</th>
+                        <th>Orders</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const totalRevenue = revenueByStateData.reduce((sum, r) => sum + r.revenue, 0);
+                        return revenueByStateData.map((row, index) => {
+                          const pct = totalRevenue > 0 ? ((row.revenue / totalRevenue) * 100).toFixed(1) : '0';
+                          return (
+                            <tr key={row.state}>
+                              <td className="serial-number">{index + 1}</td>
+                              <td>{row.state}</td>
+                              <td>₹{row.revenue.toLocaleString()}</td>
+                              <td>{pct}%</td>
+                              <td>{row.orderCount}</td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </FeatureLocked>
+        )}
+
+        {/* Top Products by Revenue Section - Last */}
+        {results.length > 0 && productSalesData.length > 0 && (
+          <FeatureLocked feature="viewResults">
+            <div className="results-section">
+              <div className="results-header">
+                <div className="results-title-section">
+                  <h2>🏆 Top 5 Products by Revenue</h2>
+                  <button
+                    onClick={() => setIsTopProductsExpanded(!isTopProductsExpanded)}
+                    className="toggle-button"
+                    title={isTopProductsExpanded ? 'Collapse table' : 'Expand table'}
+                  >
+                    {isTopProductsExpanded ? '🔽' : '▶️'}
+                  </button>
+                </div>
+                <div className="results-actions">
+                  <FeatureLocked feature="exportData">
+                    <button
+                      onClick={exportTopProducts}
+                      className="export-button"
+                      disabled={isFeatureLocked('exportData')}
+                    >
+                      📥 Export CSV
+                    </button>
+                  </FeatureLocked>
+                </div>
+              </div>
+
+              {isTopProductsExpanded && (
+                <div className="table-container">
+                  <table className="results-table">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Product Name</th>
+                        <th>Pack of One</th>
+                        <th>Pack of Two</th>
+                        <th>Total Units</th>
+                        {isAdminMode && <th>Revenue</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productSalesData.slice(0, TOP_PRODUCTS_COUNT).map((product, index) => (
+                        <tr key={index}>
+                          <td className="serial-number">{index + 1}</td>
+                          <td>{product.productName}</td>
+                          <td>{product.packOfOneSold}</td>
+                          <td>{product.packOfTwoSold}</td>
+                          <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
+                          {isAdminMode && <td>₹{product.totalSales.toLocaleString()}</td>}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </FeatureLocked>
         )}
 
