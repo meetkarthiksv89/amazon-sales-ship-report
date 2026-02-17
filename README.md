@@ -14,6 +14,7 @@ A React-based web application that helps Amazon sellers calculate shipping charg
 - **📊 Shipping Cost Calculation**: Applies state-specific rates with automatic weight rounding
 - **📋 Results Display**: Clean table showing all order details and calculations
 - **📥 CSV Export**: Export results for further analysis
+- **🔄 Return Report**: Upload Amazon return reports (TSV/TXT/CSV) with summary cards, detailed table, and CSV export
 - **🎯 Error Handling**: Graceful handling of missing states and malformed data
 - **📱 Responsive Design**: Works on desktop and mobile devices
 
@@ -48,6 +49,21 @@ Your order report should contain these columns:
 - `quantity`: Number of items ordered
 - `ship-state`: Destination state for shipping
 - `order-status`: Order status (only "Shipped" orders will be processed)
+
+#### Amazon Return Report (TSV, TXT, or CSV)
+Your return report should contain these columns:
+- `Order ID`: Amazon order identifier
+- `Return request date`: Date the return was requested
+- `Return request status`: Status of the return (e.g., "Approved")
+- `Item Name`: Product description
+- `Return quantity`: Number of units returned
+- `Return reason`: Reason for the return
+- `Resolution`: How the return was resolved (e.g., "StandardRefund")
+- `Return type`: Type of return (e.g., "Rejected", "Undelivered")
+- `Refunded Amount`: Amount refunded to the customer
+- `Category`: Product category
+
+Optional columns (used when available): `Order date`, `Return delivery date`, `Amazon RMA ID`, `Label type`, `Label cost`, `Return carrier`, `Tracking ID`, `Is prime`, `ASIN`, `Merchant SKU`, `In policy`, `Invoice number`, `Order Amount`, `Order quantity`.
 
 #### Built-in State-wise Shipping Rates
 The app includes predefined shipping rates for all Indian states:

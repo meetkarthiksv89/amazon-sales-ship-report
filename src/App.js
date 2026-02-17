@@ -11,6 +11,19 @@ const ALLOWED_STATES = [
   'KERALA'
 ];
 
+// Normalize a product name to a base name for matching (strip pack info, trailing dashes/parens)
+const normalizeBaseName = (productName) => {
+  if (!productName) return '';
+  let baseName = productName;
+  if (/pack of 2/i.test(baseName)) {
+    baseName = baseName.replace(/pack of 2/gi, '').trim();
+  } else if (/pack of 1/i.test(baseName)) {
+    baseName = baseName.replace(/pack of 1/gi, '').trim();
+  }
+  baseName = baseName.replace(/\s*-\s*$|^\s*-\s*|\s*\(\s*\)\s*$/, '').trim();
+  return baseName;
+};
+
 // Admin Context for managing admin state
 const AdminContext = createContext();
 
@@ -251,11 +264,23 @@ const AppContent = () => {
   const [uploadStatus, setUploadStatus] = useState({
     orders: false
   });
-  const [isShippingTableExpanded, setIsShippingTableExpanded] = useState(true);
-  const [isProductSalesTableExpanded, setIsProductSalesTableExpanded] = useState(true);
-  const [isRevenueByStateExpanded, setIsRevenueByStateExpanded] = useState(true);
-  const [isTopProductsExpanded, setIsTopProductsExpanded] = useState(true);
+  const [isShippingTableExpanded, setIsShippingTableExpanded] = useState(false);
+  const [isProductSalesTableExpanded, setIsProductSalesTableExpanded] = useState(false);
+  const [isRevenueByStateExpanded, setIsRevenueByStateExpanded] = useState(false);
+  const [isTopProductsExpanded, setIsTopProductsExpanded] = useState(false);
   const [expandedRows, setExpandedRows] = useState(new Set());
+
+  // Return report state
+  const [returnRawData, setReturnRawData] = useState([]);
+  const [returnData, setReturnData] = useState([]);
+  const [returnSummary, setReturnSummary] = useState(null);
+  const [returnUploadStatus, setReturnUploadStatus] = useState(false);
+  const [isReturnTableExpanded, setIsReturnTableExpanded] = useState(false);
+  const [returnFileInfo, setReturnFileInfo] = useState({
+    name: '',
+    type: '',
+    converted: false
+  });
 
   const [fileInfo, setFileInfo] = useState({
     name: '',
@@ -270,7 +295,6 @@ const AppContent = () => {
 
   // Use admin context
   const { isFeatureLocked, isAdminMode } = useAdmin();
-
 
 
   // Load shipping rates from CSV file
@@ -422,7 +446,101 @@ const AppContent = () => {
     });
   }, [parseFile]);
 
+  // Parse return report file (supports TSV, TXT, CSV)
+  const parseReturnFile = useCallback((file, callback) => {
+    const fileExtension = file.name.toLowerCase().split('.').pop();
 
+    if (fileExtension === 'tsv' || fileExtension === 'txt') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const text = e.target.result;
+          const lines = text.split('\n').filter(line => line.trim());
+          if (lines.length === 0) {
+            setError('Return report file appears to be empty');
+            return;
+          }
+          const csvContent = lines.map((line, index) => {
+            const fields = line.split('\t');
+            if (index === 0 && fields.length < 5) {
+              throw new Error('File doesn\'t appear to be a valid Amazon return report (too few columns)');
+            }
+            return fields.map(field => {
+              field = field.trim();
+              if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+                return `"${field.replace(/"/g, '""')}"`;
+              }
+              return field;
+            }).join(',');
+          }).join('\n');
+
+          const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+          Papa.parse(csvBlob, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+              if (results.errors.length > 0) {
+                setError(`Return report parsing error: ${results.errors[0].message}`);
+                return;
+              }
+              callback(results.data);
+            },
+            error: (error) => {
+              setError(`Failed to parse return report: ${error.message}`);
+            }
+          });
+        } catch (error) {
+          setError(`Return report processing error: ${error.message}`);
+        }
+      };
+      reader.onerror = () => setError('Failed to read return report file');
+      reader.readAsText(file);
+    } else {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          if (results.errors.length > 0) {
+            setError(`Return report CSV parsing error: ${results.errors[0].message}`);
+            return;
+          }
+          callback(results.data);
+        },
+        error: (error) => {
+          setError(`Failed to parse return report CSV: ${error.message}`);
+        }
+      });
+    }
+  }, []);
+
+  // Handle return report file upload
+  const handleReturnUpload = useCallback((event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const fileExtension = file.name.toLowerCase().split('.').pop();
+    if (!['txt', 'csv', 'tsv'].includes(fileExtension)) {
+      setError('Please upload a TSV, TXT, or CSV file for the return report');
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+
+    setReturnFileInfo({
+      name: file.name,
+      type: fileExtension.toUpperCase(),
+      converted: fileExtension === 'tsv' || fileExtension === 'txt'
+    });
+
+    parseReturnFile(file, (data) => {
+      setReturnRawData(data);
+      setReturnUploadStatus(true);
+      setReturnData([]);
+      setReturnSummary(null);
+      setLoading(false);
+    });
+  }, [parseReturnFile]);
 
   // Extract pack information from product name
   const extractPackInfo = (productName) => {
@@ -440,7 +558,7 @@ const AppContent = () => {
   };
 
   // Process product sales by variant (excluding cancelled orders)
-  const processProductSalesByVariant = useCallback(() => {
+  const processProductSalesByVariant = useCallback((activeReturnData = returnData) => {
     if (!orderData.length) return { productSales: [], shippingRevenue: 0 };
 
     // Filter out cancelled orders
@@ -451,11 +569,13 @@ const AppContent = () => {
 
     // Group products by base name and variant
     const productSales = {};
+    const skuToBaseName = {}; // SKU → baseName lookup for return matching
     let totalShippingRevenue = 0;
     const revenueByState = {};
 
     nonCancelledOrders.forEach(row => {
       const productName = row['product-name']?.trim();
+      const sku = row['sku']?.trim();
       const quantity = parseInt(row.quantity) || 1;
       const itemPrice = parseFloat(row['item-price']) || 0;
       const promotionDiscount = parseFloat(row['item-promotion-discount']) || 0;
@@ -479,18 +599,18 @@ const AppContent = () => {
 
       // Determine variant and extract base product name
       let variant = 'Pack of One'; // Default for uncategorized products
-      let baseName = productName;
+      let baseName = normalizeBaseName(productName);
 
       if (/pack of 2/i.test(productName)) {
         variant = 'Pack of Two';
-        baseName = productName.replace(/pack of 2/gi, '').trim();
       } else if (/pack of 1/i.test(productName)) {
         variant = 'Pack of One';
-        baseName = productName.replace(/pack of 1/gi, '').trim();
       }
 
-      // Clean up base name (remove extra spaces, dashes, parentheses)
-      baseName = baseName.replace(/\s*-\s*$|^\s*-\s*|\s*\(\s*\)\s*$/, '').trim();
+      // Map this SKU to its base product name
+      if (sku) {
+        skuToBaseName[sku] = baseName;
+      }
 
       // Initialize product entry if it doesn't exist
       if (!productSales[baseName]) {
@@ -498,7 +618,8 @@ const AppContent = () => {
           productName: baseName,
           packOfOneSold: 0,
           packOfTwoSold: 0,
-          totalSales: 0
+          totalSales: 0,
+          returnQuantity: 0
         };
       }
 
@@ -515,6 +636,34 @@ const AppContent = () => {
       // Add to total sales
       productSales[baseName].totalSales += salesAmount;
     });
+
+    // Merge return quantities from return data using SKU matching
+    if (activeReturnData.length > 0) {
+      activeReturnData.forEach(ret => {
+        const retSku = ret.sku;
+        const qty = ret.returnQuantity || 0;
+        if (!retSku) return;
+
+        const baseName = skuToBaseName[retSku];
+        if (baseName && productSales[baseName]) {
+          productSales[baseName].returnQuantity += qty;
+        } else {
+          // SKU exists only in returns — use item name as fallback label
+          const fallbackName = normalizeBaseName(ret.itemName) || retSku;
+          if (!productSales[fallbackName]) {
+            productSales[fallbackName] = {
+              productName: fallbackName,
+              packOfOneSold: 0,
+              packOfTwoSold: 0,
+              totalSales: 0,
+              returnQuantity: qty
+            };
+          } else {
+            productSales[fallbackName].returnQuantity += qty;
+          }
+        }
+      });
+    }
 
     // Convert to array and sort by total sales (descending)
     const productSalesArray = Object.values(productSales).sort((a, b) => {
@@ -537,7 +686,7 @@ const AppContent = () => {
       shippingRevenue: totalShippingRevenue,
       revenueByState: revenueByStateArray
     };
-  }, [orderData]);
+  }, [orderData, returnData]);
 
   // Process orders and calculate shipping
   const processOrders = useCallback(() => {
@@ -624,8 +773,19 @@ const AppContent = () => {
 
       setResults(processedResults);
       
+      // Process return report only when user explicitly generates the report
+      let effectiveReturnData = returnData;
+      if (returnRawData.length > 0) {
+        const { valid, normalized } = processReturnReport(returnRawData);
+        if (!valid) {
+          setLoading(false);
+          return;
+        }
+        effectiveReturnData = normalized;
+      }
+
       // Calculate product sales data, shipping revenue, and revenue by state
-      const { productSales, shippingRevenue: totalShippingRevenue, revenueByState } = processProductSalesByVariant();
+      const { productSales, shippingRevenue: totalShippingRevenue, revenueByState } = processProductSalesByVariant(effectiveReturnData);
       setProductSalesData(productSales);
       setShippingRevenue(totalShippingRevenue);
       setRevenueByStateData(revenueByState);
@@ -635,7 +795,106 @@ const AppContent = () => {
       setError(`Processing error: ${err.message}`);
       setLoading(false);
     }
-  }, [orderData, shippingRates, ratesLoaded, processProductSalesByVariant]);
+  }, [orderData, shippingRates, ratesLoaded, returnData, returnRawData, processProductSalesByVariant]);
+
+  // Process return report data
+  function processReturnReport(rawData = returnRawData) {
+    if (!rawData.length) {
+      setReturnData([]);
+      setReturnSummary(null);
+      return { valid: true, normalized: [], summary: null };
+    }
+
+    const REQUIRED_COLUMNS = ['Order ID', 'Return request status', 'Item Name', 'Return quantity'];
+    const headers = Object.keys(rawData[0]);
+    const missing = REQUIRED_COLUMNS.filter(col => !headers.includes(col));
+    if (missing.length > 0) {
+      setError(`Return report missing required columns: ${missing.join(', ')}`);
+      return { valid: false, normalized: [], summary: null };
+    }
+
+    const normalized = rawData.map(row => ({
+      orderId: (row['Order ID'] || '').trim(),
+      orderDate: (row['Order date'] || '').trim(),
+      returnRequestDate: (row['Return request date'] || '').trim(),
+      returnDeliveryDate: (row['Return delivery date'] || '').trim(),
+      status: (row['Return request status'] || '').trim(),
+      rmaId: (row['Amazon RMA ID'] || '').trim(),
+      labelType: (row['Label type'] || '').trim(),
+      labelCost: parseFloat(row['Label cost']) || 0,
+      returnCarrier: (row['Return carrier'] || '').trim(),
+      trackingId: (row['Tracking ID'] || '').trim(),
+      isPrime: (row['Is prime'] || '').trim(),
+      asin: (row['ASIN'] || '').trim(),
+      sku: (row['Merchant SKU'] || row[' Merchant SKU'] || '').trim(),
+      itemName: (row['Item Name'] || '').trim(),
+      returnQuantity: parseInt(row['Return quantity']) || 0,
+      returnReason: (row['Return reason'] || '').trim(),
+      inPolicy: (row['In policy'] || '').trim(),
+      returnType: (row['Return type'] || '').trim(),
+      resolution: (row['Resolution'] || '').trim(),
+      invoiceNumber: (row['Invoice number'] || '').trim(),
+      orderAmount: parseFloat(row['Order Amount']) || 0,
+      orderQuantity: parseInt(row['Order quantity']) || 0,
+      refundedAmount: parseFloat(row['Refunded Amount']) || 0,
+      category: (row['Category'] || '').trim(),
+    }));
+
+    const totalReturns = normalized.length;
+    const approvedCount = normalized.filter(r => r.status.toLowerCase() === 'approved').length;
+    const totalReturnQuantity = normalized.reduce((s, r) => s + r.returnQuantity, 0);
+    const totalRefunded = normalized.reduce((s, r) => s + r.refundedAmount, 0);
+    const totalLabelCost = normalized.reduce((s, r) => s + r.labelCost, 0);
+    const uniqueSkus = new Set(normalized.map(r => r.sku).filter(Boolean)).size;
+    const uniqueAsins = new Set(normalized.map(r => r.asin).filter(Boolean)).size;
+
+    const reasonCounts = {};
+    normalized.forEach(r => {
+      const reason = r.returnReason || 'Unknown';
+      reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+    });
+    const topReason = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1])[0];
+
+    const resolutionCounts = {};
+    normalized.forEach(r => {
+      const res = r.resolution || 'Unknown';
+      resolutionCounts[res] = (resolutionCounts[res] || 0) + 1;
+    });
+
+    const returnTypeCounts = {};
+    normalized.forEach(r => {
+      const rt = r.returnType || 'Unknown';
+      returnTypeCounts[rt] = (returnTypeCounts[rt] || 0) + 1;
+    });
+
+    const summary = {
+      totalReturns,
+      approvedCount,
+      totalReturnQuantity,
+      totalRefunded,
+      totalLabelCost,
+      uniqueSkus,
+      uniqueAsins,
+      topReason: topReason ? { reason: topReason[0], count: topReason[1] } : null,
+      resolutionCounts,
+      returnTypeCounts,
+    };
+
+    setReturnData(normalized);
+    setReturnSummary(summary);
+    return { valid: true, normalized, summary };
+  }
+
+  // Re-process product sales when return data changes after report is already generated
+  useEffect(() => {
+    if (results.length > 0 && orderData.length > 0) {
+      const { productSales, shippingRevenue: totalShippingRevenue, revenueByState } = processProductSalesByVariant();
+      setProductSalesData(productSales);
+      setShippingRevenue(totalShippingRevenue);
+      setRevenueByStateData(revenueByState);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnData]);
 
   // Export results to CSV
   const exportResults = useCallback(() => {
@@ -712,7 +971,8 @@ const AppContent = () => {
       'Product Name',
       'Pack of One Sold',
       'Pack of Two Sold',
-      'Total Units'
+      'Total Units',
+      'Return Qty'
     ];
     
     if (isAdminMode) {
@@ -727,7 +987,8 @@ const AppContent = () => {
           product.productName,
           product.packOfOneSold,
           product.packOfTwoSold,
-          product.packOfOneSold + (product.packOfTwoSold * 2)
+          product.packOfOneSold + (product.packOfTwoSold * 2),
+          product.returnQuantity
         ];
         
         if (isAdminMode) {
@@ -768,6 +1029,58 @@ const AppContent = () => {
     link.click();
   }, [revenueByStateData]);
 
+  // Export return report to CSV
+  const exportReturns = useCallback(() => {
+    if (!returnData.length) return;
+
+    const csvContent = Papa.unparse({
+      fields: [
+        'S.No.',
+        'Order ID',
+        'Order Date',
+        'Return Request Date',
+        'Return Delivery Date',
+        'Status',
+        'ASIN',
+        'SKU',
+        'Item Name',
+        'Return Qty',
+        'Return Reason',
+        'In Policy',
+        'Return Type',
+        'Resolution',
+        'Label Cost',
+        'Refunded Amount',
+        'Category'
+      ],
+      data: returnData.map((row, index) => [
+        index + 1,
+        row.orderId,
+        row.orderDate,
+        row.returnRequestDate,
+        row.returnDeliveryDate,
+        row.status,
+        row.asin,
+        row.sku,
+        row.itemName,
+        row.returnQuantity,
+        row.returnReason,
+        row.inPolicy,
+        row.returnType,
+        row.resolution,
+        row.labelCost.toFixed(2),
+        row.refundedAmount.toFixed(2),
+        row.category
+      ])
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'return_report.csv';
+    link.click();
+  }, [returnData]);
+
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
 
@@ -804,69 +1117,98 @@ const AppContent = () => {
           <FeatureLocked feature="uploadFiles">
             <div className="upload-section">
               <div className="upload-container">
+              <div className="upload-grid">
                 <div className="upload-area">
-                  <div className="upload-header">
-                    <div className="upload-icon">📁</div>
-                    <div className="upload-text">
-                      <h3>Upload Order Report</h3>
-                      <p>Drop your Amazon order file here or click to browse</p>
-                      <span className="supported-formats">Supports TXT & CSV formats</span>
+                    <div className="upload-header">
+                      <div className="upload-icon">📁</div>
+                      <div className="upload-text">
+                        <h3>Upload Order Report</h3>
+                        <p>Drop your Amazon order file here or click to browse</p>
+                      <a
+                        href="https://sellercentral.amazon.in/order-reports-and-feeds/reports/ref=xx_orderrpt_dnav_xx"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="report-link"
+                      >
+                        Open Order Report Page
+                      </a>
+                      </div>
                     </div>
-                  </div>
-                  
-                  <input
-                    type="file"
-                    accept=".txt,.csv"
-                    onChange={handleOrderUpload}
-                    disabled={loading || isFeatureLocked('uploadFiles')}
-                    className="file-input-hidden"
-                    id="file-upload"
-                  />
-                  <label htmlFor="file-upload" className="file-upload-label">
-                    Choose File
-                  </label>
+                    
+                    <input
+                      type="file"
+                      accept=".txt,.csv"
+                      onChange={handleOrderUpload}
+                      disabled={loading || isFeatureLocked('uploadFiles')}
+                      className="file-input-hidden"
+                      id="file-upload"
+                    />
+                    <label htmlFor="file-upload" className="file-upload-label">
+                      Choose File
+                    </label>
 
-                {uploadStatus.orders && orderData.length > 0 && (
-                  <div className="upload-success">
-                    <div className="success-indicator">
-                      <span className="success-icon">✅</span>
-                      <div className="success-details">
-                        <strong>{orderData.length} orders loaded</strong>
-                        <div className="file-details">
-                          <span className="file-name">{fileInfo.name}</span>
-                          {fileInfo.converted && (
-                            <span className="conversion-tag">TXT→CSV</span>
-                          )}
+                  {uploadStatus.orders && orderData.length > 0 && (
+                    <div className="upload-success">
+                      <div className="success-indicator">
+                        <span className="success-icon">✅</span>
+                        <div className="success-details">
+                          <strong>{orderData.length} orders loaded</strong>
+                          <div className="file-details">
+                            <span className="file-name">{fileInfo.name}</span>
+                            {fileInfo.converted && (
+                              <span className="conversion-tag">TXT→CSV</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              <div className="rates-status">
-                <div className="rates-indicator">
-                  <div className="rates-icon">⚙️</div>
-                  <div className="rates-info">
-                    <div className="rates-title">Shipping Rates</div>
-                    <div className={`rates-status-text ${ratesLoaded ? 'loaded' : 'loading'}`}>
-                      {ratesLoaded ? `${Object.keys(shippingRates).length} states configured` : 'Loading...'}
-                    </div>
-                    {ratesLoaded && (
-                      <div className="rates-sample">
-                        KA: ₹{shippingRates['KARNATAKA'] || DEFAULT_RATE} • TN: ₹{shippingRates['TAMIL NADU'] || DEFAULT_RATE} • MH: ₹{shippingRates['MAHARASHTRA'] || DEFAULT_RATE}
-                      </div>
-                    )}
-                  </div>
-                  {ratesLoaded && (
-                    <button 
-                      onClick={loadShippingRates}
-                      className="refresh-btn"
-                      disabled={loading}
-                      title="Refresh rates from CSV"
+                <div className="upload-area return-upload-area">
+                  <div className="upload-header">
+                    <div className="upload-icon">🔄</div>
+                    <div className="upload-text">
+                      <h3>Upload Return Report</h3>
+                      <p>Upload your Amazon return report file</p>
+                    <a
+                      href="https://sellercentral.amazon.in/returns/report/ref=xx_scnvrr_dnav_xx"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="report-link"
                     >
-                      🔄
-                    </button>
+                      Open Return Report Page
+                    </a>
+                    </div>
+                  </div>
+
+                  <input
+                    type="file"
+                    accept=".tsv,.txt,.csv"
+                    onChange={handleReturnUpload}
+                    disabled={loading || isFeatureLocked('uploadFiles')}
+                    className="file-input-hidden"
+                    id="return-file-upload"
+                  />
+                  <label htmlFor="return-file-upload" className="file-upload-label">
+                    Choose File
+                  </label>
+
+                  {returnUploadStatus && returnRawData.length > 0 && (
+                    <div className="upload-success">
+                      <div className="success-indicator">
+                        <span className="success-icon">✅</span>
+                        <div className="success-details">
+                          <strong>{returnRawData.length} returns loaded</strong>
+                          <div className="file-details">
+                            <span className="file-name">{returnFileInfo.name}</span>
+                            {returnFileInfo.converted && (
+                              <span className="conversion-tag">{returnFileInfo.type}→CSV</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1114,6 +1456,18 @@ const AppContent = () => {
                   </div>
                 </div>
 
+                {productSalesData.some(p => p.returnQuantity > 0) && (
+                  <div className="summary-card-modern return-card">
+                    <div className="card-icon">🔄</div>
+                    <div className="card-content">
+                      <div className="card-value">
+                        {productSalesData.reduce((sum, product) => sum + product.returnQuantity, 0)}
+                      </div>
+                      <div className="card-label">Total Returns</div>
+                    </div>
+                  </div>
+                )}
+
                 {isAdminMode && (
                   <>
                     <div className="summary-card-modern revenue-card">
@@ -1150,6 +1504,7 @@ const AppContent = () => {
                       <th>Pack of One Sold</th>
                       <th>Pack of Two Sold</th>
                       <th>Total Units</th>
+                      <th>Return Qty</th>
                       {isAdminMode && <th>Total Sales</th>}
                     </tr>
                   </thead>
@@ -1161,6 +1516,7 @@ const AppContent = () => {
                         <td>{product.packOfOneSold}</td>
                         <td>{product.packOfTwoSold}</td>
                         <td>{product.packOfOneSold + (product.packOfTwoSold * 2)}</td>
+                        <td className={product.returnQuantity > 0 ? 'return-qty-highlight' : ''}>{product.returnQuantity}</td>
                         {isAdminMode && <td>₹{product.totalSales.toLocaleString()}</td>}
                       </tr>
                     ))}
@@ -1296,6 +1652,158 @@ const AppContent = () => {
                           );
                         });
                       })()}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </FeatureLocked>
+        )}
+
+        {/* Return Report Section */}
+        {returnData.length > 0 && returnSummary && (
+          <FeatureLocked feature="viewResults">
+            <div className="results-section">
+              <div className="results-header">
+                <div className="results-title-section">
+                  <h2>🔄 Return Report</h2>
+                  <button
+                    onClick={() => setIsReturnTableExpanded(!isReturnTableExpanded)}
+                    className="toggle-button"
+                    title={isReturnTableExpanded ? 'Collapse table' : 'Expand table'}
+                  >
+                    {isReturnTableExpanded ? '🔽' : '▶️'}
+                  </button>
+                </div>
+                <div className="results-actions">
+                  <input
+                    type="file"
+                    accept=".tsv,.txt,.csv"
+                    onChange={handleReturnUpload}
+                    disabled={loading}
+                    className="file-input-hidden"
+                    id="return-file-reupload"
+                  />
+                  <label htmlFor="return-file-reupload" className="upload-new-button">
+                    📁 Upload New File
+                  </label>
+                  <FeatureLocked feature="exportData">
+                    <button
+                      onClick={exportReturns}
+                      className="export-button"
+                      disabled={isFeatureLocked('exportData')}
+                    >
+                      📥 Export CSV
+                    </button>
+                  </FeatureLocked>
+                </div>
+              </div>
+
+              <div className="summary">
+                <div className="summary-grid">
+                  <div className="summary-card-modern orders-card">
+                    <div className="card-icon">🔄</div>
+                    <div className="card-content">
+                      <div className="card-value">{returnSummary.totalReturns}</div>
+                      <div className="card-label">Total Returns</div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern cost-card">
+                    <div className="card-icon">✅</div>
+                    <div className="card-content">
+                      <div className="card-value">{returnSummary.approvedCount}</div>
+                      <div className="card-label">Approved</div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern average-card">
+                    <div className="card-icon">📦</div>
+                    <div className="card-content">
+                      <div className="card-value">{returnSummary.totalReturnQuantity}</div>
+                      <div className="card-label">Units Returned</div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern">
+                    <div className="card-icon">🏷️</div>
+                    <div className="card-content">
+                      <div className="card-value">{returnSummary.uniqueSkus}</div>
+                      <div className="card-label">Unique SKUs</div>
+                    </div>
+                  </div>
+
+                  {isAdminMode && (
+                    <>
+                      <div className="summary-card-modern revenue-card">
+                        <div className="card-icon">💸</div>
+                        <div className="card-content">
+                          <div className="card-value">₹{returnSummary.totalRefunded.toLocaleString()}</div>
+                          <div className="card-label">Total Refunded</div>
+                        </div>
+                      </div>
+
+                      <div className="summary-card-modern cost-card">
+                        <div className="card-icon">🏷️</div>
+                        <div className="card-content">
+                          <div className="card-value">₹{returnSummary.totalLabelCost.toLocaleString()}</div>
+                          <div className="card-label">Label Cost</div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {returnSummary.topReason && (
+                  <div className="warning-banner" style={{ marginTop: '12px' }}>
+                    <div className="warning-icon">📋</div>
+                    <div className="warning-content">
+                      <strong>Top Return Reason:</strong> {returnSummary.topReason.reason} ({returnSummary.topReason.count} returns)
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {isReturnTableExpanded && (
+                <div className="table-container">
+                  <table className="results-table return-table">
+                    <thead>
+                      <tr>
+                        <th>S.No.</th>
+                        <th>Order ID</th>
+                        <th>Return Date</th>
+                        <th>Status</th>
+                        <th>SKU</th>
+                        <th>Item Name</th>
+                        <th>Qty</th>
+                        <th>Reason</th>
+                        <th>Return Type</th>
+                        <th>Resolution</th>
+                        {isAdminMode && <th>Refunded</th>}
+                        <th>Category</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {returnData.map((row, index) => (
+                        <tr key={index}>
+                          <td className="serial-number">{index + 1}</td>
+                          <td>{row.orderId}</td>
+                          <td>{row.returnRequestDate}</td>
+                          <td>
+                            <span className={`return-status-badge ${row.status.toLowerCase() === 'approved' ? 'status-approved' : 'status-other'}`}>
+                              {row.status}
+                            </span>
+                          </td>
+                          <td>{row.sku}</td>
+                          <td className="item-name-cell">{row.itemName}</td>
+                          <td>{row.returnQuantity}</td>
+                          <td>{row.returnReason}</td>
+                          <td>{row.returnType}</td>
+                          <td>{row.resolution}</td>
+                          {isAdminMode && <td>₹{row.refundedAmount.toLocaleString()}</td>}
+                          <td>{row.category}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
