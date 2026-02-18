@@ -1647,6 +1647,7 @@ const AppContent = () => {
                   )}
                 </div>
 
+                {isAdminMode && (
                 <div className="upload-area payments-upload-area">
                   <div className="upload-header">
                     <div className="upload-icon">💳</div>
@@ -1698,6 +1699,7 @@ const AppContent = () => {
                     </div>
                   )}
                 </div>
+                )}
               </div>
             </div>
           </div>
@@ -2314,18 +2316,22 @@ const AppContent = () => {
                   </button>
                 </div>
                 <div className="results-actions">
-                  <input
-                    type="file"
-                    accept=".txt,.csv,.tsv"
-                    multiple
-                    onChange={handlePaymentsUpload}
-                    disabled={loading}
-                    className="file-input-hidden"
-                    id="payments-file-reupload"
-                  />
-                  <label htmlFor="payments-file-reupload" className="upload-new-button">
-                    📁 Upload New Files
-                  </label>
+                  {isAdminMode && (
+                    <>
+                      <input
+                        type="file"
+                        accept=".txt,.csv,.tsv"
+                        multiple
+                        onChange={handlePaymentsUpload}
+                        disabled={loading}
+                        className="file-input-hidden"
+                        id="payments-file-reupload"
+                      />
+                      <label htmlFor="payments-file-reupload" className="upload-new-button">
+                        📁 Upload New Files
+                      </label>
+                    </>
+                  )}
                   <FeatureLocked feature="exportData">
                     <button
                       onClick={exportPaymentSummary}
