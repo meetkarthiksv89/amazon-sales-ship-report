@@ -1565,7 +1565,7 @@ const AppContent = () => {
                         rel="noopener noreferrer"
                         className="report-link"
                       >
-                        Open Order Report Page
+                        Download Order Report Page
                       </a>
                       </div>
                     </div>
@@ -1612,7 +1612,7 @@ const AppContent = () => {
                       rel="noopener noreferrer"
                       className="report-link"
                     >
-                      Open Return Report Page
+                      Download Return Report Page
                     </a>
                     </div>
                   </div>
