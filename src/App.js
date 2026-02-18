@@ -269,6 +269,16 @@ const AppContent = () => {
   const [isRevenueByStateExpanded, setIsRevenueByStateExpanded] = useState(false);
   const [isTopProductsExpanded, setIsTopProductsExpanded] = useState(false);
   const [expandedRows, setExpandedRows] = useState(new Set());
+  const [paymentStatements, setPaymentStatements] = useState([]);
+  const [paymentFileResults, setPaymentFileResults] = useState([]);
+  const [paymentUploadStatus, setPaymentUploadStatus] = useState({
+    filesUploaded: 0,
+    statementsLoaded: 0,
+    failedFiles: 0
+  });
+  const [selectedSettlementId, setSelectedSettlementId] = useState('');
+  const [isPaymentsTableExpanded, setIsPaymentsTableExpanded] = useState(true);
+  const [isPaymentDetailsExpanded, setIsPaymentDetailsExpanded] = useState(true);
 
   // Return report state
   const [returnRawData, setReturnRawData] = useState([]);
@@ -292,9 +302,43 @@ const AppContent = () => {
 
   const DEFAULT_RATE = 60; // Default rate per kg if state not found
   const TOP_PRODUCTS_COUNT = 5;
+  const MONEY_TOLERANCE_PAISE = 1; // 1 paisa
 
   // Use admin context
   const { isFeatureLocked, isAdminMode } = useAdmin();
+
+  const toPaise = (value) => {
+    const numeric = parseFloat(value);
+    if (Number.isNaN(numeric)) return 0;
+    return Math.round(numeric * 100);
+  };
+
+  const fromPaise = (value) => value / 100;
+
+  const formatStatementPeriod = (startDateRaw, endDateRaw) => {
+    const clean = (value) => {
+      if (!value) return '';
+      return value.split(' ')[0].replace(/\./g, '/');
+    };
+    const start = clean(startDateRaw);
+    const end = clean(endDateRaw);
+    if (!start || !end) return 'Unknown';
+    return `${start} - ${end}`;
+  };
+
+  const bucketPaymentRow = (row) => {
+    const transactionType = row.transactionType;
+    const amountType = row.amountType;
+
+    if (transactionType === 'Order') {
+      if (amountType === 'ItemPrice') return 'sales';
+      return 'expenses';
+    }
+
+    if (transactionType === 'Refund') return 'refunds';
+    if (transactionType === 'other-transaction' || transactionType === 'ServiceFee') return 'expenses';
+    return 'others';
+  };
 
 
   // Load shipping rates from CSV file
@@ -542,6 +586,218 @@ const AppContent = () => {
     });
   }, [parseReturnFile]);
 
+  const parsePaymentsFile = useCallback((file) => {
+    const extension = file.name.toLowerCase().split('.').pop();
+
+    return new Promise((resolve, reject) => {
+      const parseRows = (input, options = {}) => {
+        Papa.parse(input, {
+          header: true,
+          skipEmptyLines: true,
+          ...options,
+          complete: (results) => {
+            if (results.errors.length > 0) {
+              reject(new Error(results.errors[0].message));
+              return;
+            }
+            resolve(results.data);
+          },
+          error: (error) => reject(error)
+        });
+      };
+
+      if (extension === 'txt' || extension === 'tsv') {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          parseRows(e.target.result, { delimiter: '\t' });
+        };
+        reader.onerror = () => reject(new Error('Failed to read payments file'));
+        reader.readAsText(file);
+      } else if (extension === 'csv') {
+        parseRows(file);
+      } else {
+        reject(new Error('Unsupported file type'));
+      }
+    });
+  }, []);
+
+  const buildSettlementSummary = useCallback((rows, sourceFileName) => {
+    if (!rows.length) {
+      throw new Error('File is empty');
+    }
+
+    const headerRow = rows.find(
+      (row) => !((row['transaction-type'] || '').trim()) && ((row['total-amount'] || '').trim())
+    );
+
+    if (!headerRow) {
+      throw new Error('No settlement header found (missing total-amount row)');
+    }
+
+    const settlementId = (headerRow['settlement-id'] || '').trim();
+    if (!settlementId) {
+      throw new Error('Settlement header does not contain settlement-id');
+    }
+
+    const payoutAmountPaise = toPaise(headerRow['total-amount']);
+    const statementPeriod = formatStatementPeriod(
+      headerRow['settlement-start-date'],
+      headerRow['settlement-end-date']
+    );
+
+    const detailRows = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => (row['transaction-type'] || '').trim())
+      .map(({ row, index }) => {
+        const amountPaise = toPaise(row.amount);
+        const normalized = {
+          sourceFileName,
+          settlementId: (row['settlement-id'] || settlementId).trim() || settlementId,
+          transactionType: (row['transaction-type'] || '').trim(),
+          amountType: (row['amount-type'] || '').trim(),
+          amountDescription: (row['amount-description'] || '').trim(),
+          amountPaise,
+          orderId: (row['order-id'] || '').trim(),
+          adjustmentId: (row['adjustment-id'] || '').trim(),
+          postedDate: (row['posted-date'] || '').trim(),
+          postedDateTime: (row['posted-date-time'] || '').trim(),
+          sku: (row.sku || '').trim(),
+          marketplaceName: (row['marketplace-name'] || '').trim(),
+          currency: (row.currency || '').trim() || (headerRow.currency || '').trim(),
+          lineNumber: index + 2
+        };
+
+        normalized.bucket = bucketPaymentRow(normalized);
+        return normalized;
+      });
+
+    if (!detailRows.length) {
+      throw new Error('No transaction rows found in settlement file');
+    }
+
+    const bucketTotals = {
+      salesPaise: 0,
+      refundsPaise: 0,
+      expensesPaise: 0,
+      othersPaise: 0
+    };
+
+    detailRows.forEach((row) => {
+      if (row.bucket === 'sales') bucketTotals.salesPaise += row.amountPaise;
+      else if (row.bucket === 'refunds') bucketTotals.refundsPaise += row.amountPaise;
+      else if (row.bucket === 'expenses') bucketTotals.expensesPaise += row.amountPaise;
+      else bucketTotals.othersPaise += row.amountPaise;
+    });
+
+    const computedPayoutPaise = detailRows.reduce((sum, row) => sum + row.amountPaise, 0);
+    const reconcileDifferencePaise = computedPayoutPaise - payoutAmountPaise;
+    const reconcilePass = Math.abs(reconcileDifferencePaise) <= MONEY_TOLERANCE_PAISE;
+
+    return {
+      settlementId,
+      sourceFileName,
+      statementPeriod,
+      settlementStartDate: (headerRow['settlement-start-date'] || '').trim(),
+      settlementEndDate: (headerRow['settlement-end-date'] || '').trim(),
+      depositDate: (headerRow['deposit-date'] || '').trim(),
+      currency: (headerRow.currency || '').trim(),
+      beginningBalancePaise: 0,
+      payoutAmountPaise,
+      computedPayoutPaise,
+      reconcileDifferencePaise,
+      reconcilePass,
+      ...bucketTotals,
+      details: detailRows
+    };
+  }, [MONEY_TOLERANCE_PAISE]);
+
+  const handlePaymentsUpload = useCallback(async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    const validExtensions = ['txt', 'csv', 'tsv'];
+    const invalid = files.filter((file) => {
+      const ext = file.name.toLowerCase().split('.').pop();
+      return !validExtensions.includes(ext);
+    });
+
+    if (invalid.length > 0) {
+      setError(`Unsupported files: ${invalid.map((file) => file.name).join(', ')}`);
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const settledResults = await Promise.allSettled(
+        files.map(async (file) => {
+          const parsedRows = await parsePaymentsFile(file);
+          const statement = buildSettlementSummary(parsedRows, file.name);
+          return statement;
+        })
+      );
+
+      const successfulStatements = [];
+      const fileResults = [];
+
+      settledResults.forEach((result, index) => {
+        const fileName = files[index].name;
+        if (result.status === 'fulfilled') {
+          successfulStatements.push(result.value);
+          fileResults.push({ fileName, status: 'success', message: '' });
+        } else {
+          fileResults.push({
+            fileName,
+            status: 'error',
+            message: result.reason?.message || 'Failed to parse file'
+          });
+        }
+      });
+
+      if (!successfulStatements.length) {
+        setPaymentStatements([]);
+        setSelectedSettlementId('');
+        setPaymentUploadStatus({
+          filesUploaded: files.length,
+          statementsLoaded: 0,
+          failedFiles: files.length
+        });
+        setPaymentFileResults(fileResults);
+        setError('Could not parse any payments files. Please check file format.');
+        setLoading(false);
+        return;
+      }
+
+      const dedupedMap = new Map();
+      successfulStatements.forEach((statement) => {
+        if (!dedupedMap.has(statement.settlementId)) {
+          dedupedMap.set(statement.settlementId, statement);
+        }
+      });
+
+      const dedupedStatements = Array.from(dedupedMap.values()).sort((a, b) => {
+        return (b.settlementStartDate || '').localeCompare(a.settlementStartDate || '');
+      });
+
+      setPaymentStatements(dedupedStatements);
+      setSelectedSettlementId(dedupedStatements[0]?.settlementId || '');
+      setPaymentUploadStatus({
+        filesUploaded: files.length,
+        statementsLoaded: dedupedStatements.length,
+        failedFiles: fileResults.filter((row) => row.status === 'error').length
+      });
+      setPaymentFileResults(fileResults);
+      setIsPaymentsTableExpanded(true);
+      setIsPaymentDetailsExpanded(true);
+    } catch (err) {
+      setError(`Payments parsing error: ${err.message}`);
+    } finally {
+      setLoading(false);
+      event.target.value = '';
+    }
+  }, [parsePaymentsFile, buildSettlementSummary]);
+
   // Extract pack information from product name
   const extractPackInfo = (productName) => {
     const hasPackOfOne = /Pack of 1/i.test(productName);
@@ -689,6 +945,7 @@ const AppContent = () => {
   }, [orderData, returnData]);
 
   // Process orders and calculate shipping
+  /* eslint-disable react-hooks/exhaustive-deps */
   const processOrders = useCallback(() => {
     if (!orderData.length) {
       setError('Please upload the Amazon order report CSV file');
@@ -796,6 +1053,7 @@ const AppContent = () => {
       setLoading(false);
     }
   }, [orderData, shippingRates, ratesLoaded, returnData, returnRawData, processProductSalesByVariant]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Process return report data
   function processReturnReport(rawData = returnRawData) {
@@ -1081,8 +1339,185 @@ const AppContent = () => {
     link.click();
   }, [returnData]);
 
+  const exportPaymentSummary = useCallback(() => {
+    if (!paymentStatements.length) return;
+
+    const csvContent = Papa.unparse({
+      fields: [
+        'S.No.',
+        'Settlement ID',
+        'Statement Period',
+        'Deposit Date',
+        'Beginning Balance',
+        'Sales',
+        'Refunds',
+        'Expenses',
+        'Others',
+        'Payout Amount',
+        'Computed Payout',
+        'Reconcile Difference',
+        'Reconcile Status',
+        'Source File'
+      ],
+      data: paymentStatements.map((statement, index) => [
+        index + 1,
+        statement.settlementId,
+        statement.statementPeriod,
+        statement.depositDate,
+        fromPaise(statement.beginningBalancePaise).toFixed(2),
+        fromPaise(statement.salesPaise).toFixed(2),
+        fromPaise(statement.refundsPaise).toFixed(2),
+        fromPaise(statement.expensesPaise).toFixed(2),
+        fromPaise(statement.othersPaise).toFixed(2),
+        fromPaise(statement.payoutAmountPaise).toFixed(2),
+        fromPaise(statement.computedPayoutPaise).toFixed(2),
+        fromPaise(statement.reconcileDifferencePaise).toFixed(2),
+        statement.reconcilePass ? 'PASS' : 'FAIL',
+        statement.sourceFileName
+      ])
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'amazon_payment_statements_summary.csv';
+    link.click();
+  }, [paymentStatements]);
+
+  const exportPaymentDetails = useCallback(() => {
+    const target = paymentStatements.find((statement) => statement.settlementId === selectedSettlementId);
+    if (!target) return;
+
+    const csvContent = Papa.unparse({
+      fields: [
+        'S.No.',
+        'Settlement ID',
+        'Bucket',
+        'Transaction Type',
+        'Amount Type',
+        'Amount Description',
+        'Amount',
+        'Order ID',
+        'Adjustment ID',
+        'SKU',
+        'Posted Date',
+        'Posted Date Time',
+        'Marketplace',
+        'Source File'
+      ],
+      data: target.details.map((row, index) => [
+        index + 1,
+        row.settlementId,
+        row.bucket,
+        row.transactionType,
+        row.amountType,
+        row.amountDescription,
+        fromPaise(row.amountPaise).toFixed(2),
+        row.orderId,
+        row.adjustmentId,
+        row.sku,
+        row.postedDate,
+        row.postedDateTime,
+        row.marketplaceName,
+        row.sourceFileName
+      ])
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `payment_details_${target.settlementId}.csv`;
+    link.click();
+  }, [paymentStatements, selectedSettlementId]);
+
   // Calculate total shipping cost
   const totalShippingCost = results.reduce((sum, order) => sum + order.shippingCost, 0);
+  const selectedPaymentStatement = paymentStatements.find(
+    (statement) => statement.settlementId === selectedSettlementId
+  );
+  const paymentBreakdown = [
+    {
+      key: 'sales',
+      label: 'Sales',
+      valuePaise: paymentStatements.reduce((sum, statement) => sum + statement.salesPaise, 0),
+      color: '#16a34a'
+    },
+    {
+      key: 'refunds',
+      label: 'Refunds',
+      valuePaise: paymentStatements.reduce((sum, statement) => sum + statement.refundsPaise, 0),
+      color: '#2563eb'
+    },
+    {
+      key: 'expenses',
+      label: 'Expenses',
+      valuePaise: paymentStatements.reduce((sum, statement) => sum + statement.expensesPaise, 0),
+      color: '#dc2626'
+    },
+    {
+      key: 'others',
+      label: 'Others',
+      valuePaise: paymentStatements.reduce((sum, statement) => sum + statement.othersPaise, 0),
+      color: '#7c3aed'
+    }
+  ];
+  const paymentBreakdownTotalMagnitude = paymentBreakdown.reduce(
+    (sum, item) => sum + Math.abs(item.valuePaise),
+    0
+  );
+  let paymentBreakdownAccumulator = 0;
+  const paymentBreakdownGradient = paymentBreakdown.map((item) => {
+    const percentage = paymentBreakdownTotalMagnitude > 0
+      ? (Math.abs(item.valuePaise) / paymentBreakdownTotalMagnitude) * 100
+      : 0;
+    const start = paymentBreakdownAccumulator;
+    const end = start + percentage;
+    paymentBreakdownAccumulator = end;
+    return `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+  }).join(', ');
+  const paymentSalesPaise = paymentBreakdown.find((item) => item.key === 'sales')?.valuePaise || 0;
+  const paymentRefundsPaise = paymentBreakdown.find((item) => item.key === 'refunds')?.valuePaise || 0;
+  const paymentExpensesPaise = paymentBreakdown.find((item) => item.key === 'expenses')?.valuePaise || 0;
+  const paymentOthersPaise = paymentBreakdown.find((item) => item.key === 'others')?.valuePaise || 0;
+  const paymentNetPayoutPaise = paymentSalesPaise + paymentRefundsPaise + paymentExpensesPaise + paymentOthersPaise;
+  const paymentSalesBase = Math.max(Math.abs(paymentSalesPaise), 1);
+  const paymentBridgeRows = [
+    {
+      key: 'sales',
+      label: 'Sales',
+      valuePaise: paymentSalesPaise,
+      color: '#16a34a',
+      percentOfSales: 100
+    },
+    {
+      key: 'refunds',
+      label: 'Refunds',
+      valuePaise: paymentRefundsPaise,
+      color: '#2563eb',
+      percentOfSales: (Math.abs(paymentRefundsPaise) / paymentSalesBase) * 100
+    },
+    {
+      key: 'expenses',
+      label: 'Expenses',
+      valuePaise: paymentExpensesPaise,
+      color: '#dc2626',
+      percentOfSales: (Math.abs(paymentExpensesPaise) / paymentSalesBase) * 100
+    },
+    {
+      key: 'others',
+      label: 'Others',
+      valuePaise: paymentOthersPaise,
+      color: '#7c3aed',
+      percentOfSales: (Math.abs(paymentOthersPaise) / paymentSalesBase) * 100
+    },
+    {
+      key: 'net',
+      label: 'Net Payout',
+      valuePaise: paymentNetPayoutPaise,
+      color: '#0f172a',
+      percentOfSales: (Math.abs(paymentNetPayoutPaise) / paymentSalesBase) * 100
+    }
+  ];
 
   // Toggle row expansion
   const toggleRowExpansion = (orderId) => {
@@ -1204,6 +1639,58 @@ const AppContent = () => {
                             <span className="file-name">{returnFileInfo.name}</span>
                             {returnFileInfo.converted && (
                               <span className="conversion-tag">{returnFileInfo.type}→CSV</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="upload-area payments-upload-area">
+                  <div className="upload-header">
+                    <div className="upload-icon">💳</div>
+                    <div className="upload-text">
+                      <h3>Upload Payments Flat File V2</h3>
+                      <p>Select one or more Amazon settlement flatfiles</p>
+                      <a
+                        href="https://sellercentral.amazon.in/payments/reports-and-statements"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="report-link"
+                      >
+                        Open Payments Statements Page
+                      </a>
+                    </div>
+                  </div>
+
+                  <input
+                    type="file"
+                    accept=".txt,.csv,.tsv"
+                    multiple
+                    onChange={handlePaymentsUpload}
+                    disabled={loading || isFeatureLocked('uploadFiles')}
+                    className="file-input-hidden"
+                    id="payments-file-upload"
+                  />
+                  <label htmlFor="payments-file-upload" className="file-upload-label">
+                    Choose Files
+                  </label>
+
+                  {paymentUploadStatus.filesUploaded > 0 && (
+                    <div className="upload-success">
+                      <div className="success-indicator">
+                        <span className="success-icon">✅</span>
+                        <div className="success-details">
+                          <strong>{paymentUploadStatus.statementsLoaded} statements loaded</strong>
+                          <div className="file-details">
+                            <span className="file-name">
+                              {paymentUploadStatus.filesUploaded} files uploaded
+                            </span>
+                            {paymentUploadStatus.failedFiles > 0 && (
+                              <span className="conversion-tag">
+                                {paymentUploadStatus.failedFiles} failed
+                              </span>
                             )}
                           </div>
                         </div>
@@ -1807,6 +2294,285 @@ const AppContent = () => {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+          </FeatureLocked>
+        )}
+
+        {paymentStatements.length > 0 && (
+          <FeatureLocked feature="viewResults">
+            <div className="results-section">
+              <div className="results-header">
+                <div className="results-title-section">
+                  <h2>💳 Payments Dashboard</h2>
+                  <button
+                    onClick={() => setIsPaymentsTableExpanded(!isPaymentsTableExpanded)}
+                    className="toggle-button"
+                    title={isPaymentsTableExpanded ? 'Collapse table' : 'Expand table'}
+                  >
+                    {isPaymentsTableExpanded ? '🔽' : '▶️'}
+                  </button>
+                </div>
+                <div className="results-actions">
+                  <input
+                    type="file"
+                    accept=".txt,.csv,.tsv"
+                    multiple
+                    onChange={handlePaymentsUpload}
+                    disabled={loading}
+                    className="file-input-hidden"
+                    id="payments-file-reupload"
+                  />
+                  <label htmlFor="payments-file-reupload" className="upload-new-button">
+                    📁 Upload New Files
+                  </label>
+                  <FeatureLocked feature="exportData">
+                    <button
+                      onClick={exportPaymentSummary}
+                      className="export-button"
+                      disabled={isFeatureLocked('exportData')}
+                    >
+                      📥 Export Summary CSV
+                    </button>
+                  </FeatureLocked>
+                </div>
+              </div>
+
+              <div className="summary">
+                <div className="summary-grid">
+                  <div className="summary-card-modern orders-card">
+                    <div className="card-icon">🧾</div>
+                    <div className="card-content">
+                      <div className="card-value">{paymentStatements.length}</div>
+                      <div className="card-label">Statements</div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern revenue-card">
+                    <div className="card-icon">💰</div>
+                    <div className="card-content">
+                      <div className="card-value">
+                        ₹
+                        {fromPaise(
+                          paymentStatements.reduce((sum, statement) => sum + statement.payoutAmountPaise, 0)
+                        ).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </div>
+                      <div className="card-label">Total Payout</div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern cost-card">
+                    <div className="card-icon">✅</div>
+                    <div className="card-content">
+                      <div className="card-value">
+                        {paymentStatements.filter((statement) => statement.reconcilePass).length}/
+                        {paymentStatements.length}
+                      </div>
+                      <div className="card-label">Reconciled</div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern payment-pie-card">
+                    <div className="payment-pie-content">
+                      <div
+                        className="payment-pie-chart"
+                        style={{
+                          background: paymentBreakdownTotalMagnitude > 0
+                            ? `conic-gradient(${paymentBreakdownGradient})`
+                            : '#e5e7eb'
+                        }}
+                        title="Breakdown by absolute value"
+                      />
+                      <div className="payment-pie-legend">
+                        <div className="card-label">Breakdown (Abs.)</div>
+                        {paymentBreakdown.map((item) => {
+                          const percentage = paymentBreakdownTotalMagnitude > 0
+                            ? (Math.abs(item.valuePaise) / paymentBreakdownTotalMagnitude) * 100
+                            : 0;
+                          return (
+                            <div className="payment-legend-row" key={item.key}>
+                              <span
+                                className="payment-legend-dot"
+                                style={{ backgroundColor: item.color }}
+                              />
+                              <span className="payment-legend-name">{item.label}</span>
+                              <span className="payment-legend-value">
+                                ₹{fromPaise(item.valuePaise).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              </span>
+                              <span className="payment-legend-pct">{percentage.toFixed(1)}%</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="summary-card-modern payment-bridge-card">
+                    <div className="payment-bridge-content">
+                      <div className="card-label">Sales To Payout Bridge</div>
+                      {paymentBridgeRows.map((row) => {
+                        const width = row.key === 'sales'
+                          ? 100
+                          : Math.min(100, row.percentOfSales);
+                        return (
+                          <div className="payment-bridge-row" key={row.key}>
+                            <div className="payment-bridge-row-top">
+                              <span className="payment-bridge-label">{row.label}</span>
+                              <span className="payment-bridge-value">
+                                ₹{fromPaise(row.valuePaise).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div className="payment-bridge-track">
+                              <div
+                                className="payment-bridge-bar"
+                                style={{
+                                  width: `${width}%`,
+                                  backgroundColor: row.color
+                                }}
+                              />
+                            </div>
+                            <div className="payment-bridge-meta">
+                              {row.key === 'sales'
+                                ? '100% of sales'
+                                : `${row.percentOfSales.toFixed(1)}% of sales`}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {paymentFileResults.some((file) => file.status === 'error') && (
+                  <div className="warning-banner">
+                    <div className="warning-icon">⚠️</div>
+                    <div className="warning-content">
+                      <strong>Some files failed:</strong>{' '}
+                      {paymentFileResults
+                        .filter((file) => file.status === 'error')
+                        .map((file) => `${file.fileName} (${file.message})`)
+                        .join('; ')}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {isPaymentsTableExpanded && (
+                <div className="table-container">
+                  <table className="results-table payments-table">
+                    <thead>
+                      <tr>
+                        <th>S.No.</th>
+                        <th>Settlement ID</th>
+                        <th>Statement Period</th>
+                        <th>Beginning Balance</th>
+                        <th>Sales</th>
+                        <th>Refunds</th>
+                        <th>Expenses</th>
+                        <th>Others</th>
+                        <th>Payout Amount</th>
+                        <th>Reconcile</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentStatements.map((statement, index) => (
+                        <tr
+                          key={statement.settlementId}
+                          className={selectedSettlementId === statement.settlementId ? 'selected-payment-row' : ''}
+                          onClick={() => setSelectedSettlementId(statement.settlementId)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <td className="serial-number">{index + 1}</td>
+                          <td>{statement.settlementId}</td>
+                          <td>{statement.statementPeriod}</td>
+                          <td>₹{fromPaise(statement.beginningBalancePaise).toLocaleString()}</td>
+                          <td>₹{fromPaise(statement.salesPaise).toLocaleString()}</td>
+                          <td>₹{fromPaise(statement.refundsPaise).toLocaleString()}</td>
+                          <td>₹{fromPaise(statement.expensesPaise).toLocaleString()}</td>
+                          <td>₹{fromPaise(statement.othersPaise).toLocaleString()}</td>
+                          <td>₹{fromPaise(statement.payoutAmountPaise).toLocaleString()}</td>
+                          <td>
+                            <span
+                              className={`reconcile-badge ${
+                                statement.reconcilePass ? 'reconcile-pass' : 'reconcile-fail'
+                              }`}
+                            >
+                              {statement.reconcilePass ? 'PASS' : 'FAIL'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {selectedPaymentStatement && (
+                <>
+                  <div className="results-header payment-detail-header">
+                    <div className="results-title-section">
+                      <h2>🔎 Statement Details: {selectedPaymentStatement.settlementId}</h2>
+                      <button
+                        onClick={() => setIsPaymentDetailsExpanded(!isPaymentDetailsExpanded)}
+                        className="toggle-button"
+                        title={isPaymentDetailsExpanded ? 'Collapse table' : 'Expand table'}
+                      >
+                        {isPaymentDetailsExpanded ? '🔽' : '▶️'}
+                      </button>
+                    </div>
+                    <div className="results-actions">
+                      <FeatureLocked feature="exportData">
+                        <button
+                          onClick={exportPaymentDetails}
+                          className="export-button"
+                          disabled={isFeatureLocked('exportData')}
+                        >
+                          📥 Export Details CSV
+                        </button>
+                      </FeatureLocked>
+                    </div>
+                  </div>
+
+                  <div className="payment-reconcile-note">
+                    Reconcile = Beginning Balance + Sales + Refunds + Expenses + Others. Difference:{' '}
+                    ₹{fromPaise(selectedPaymentStatement.reconcileDifferencePaise).toFixed(2)}
+                  </div>
+
+                  {isPaymentDetailsExpanded && (
+                    <div className="table-container">
+                      <table className="results-table payments-detail-table">
+                        <thead>
+                          <tr>
+                            <th>S.No.</th>
+                            <th>Bucket</th>
+                            <th>Transaction Type</th>
+                            <th>Amount Type</th>
+                            <th>Description</th>
+                            <th>Amount</th>
+                            <th>Order ID</th>
+                            <th>Posted Date</th>
+                            <th>SKU</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedPaymentStatement.details.map((row, index) => (
+                            <tr key={`${row.settlementId}-${row.lineNumber}-${index}`}>
+                              <td className="serial-number">{index + 1}</td>
+                              <td>{row.bucket}</td>
+                              <td>{row.transactionType}</td>
+                              <td>{row.amountType}</td>
+                              <td>{row.amountDescription}</td>
+                              <td>₹{fromPaise(row.amountPaise).toLocaleString()}</td>
+                              <td>{row.orderId || '-'}</td>
+                              <td>{row.postedDateTime || row.postedDate || '-'}</td>
+                              <td>{row.sku || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </FeatureLocked>

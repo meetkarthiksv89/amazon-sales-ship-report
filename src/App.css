@@ -528,6 +528,154 @@ body {
   transition: background-color 0.15s ease;
 }
 
+.selected-payment-row {
+  background-color: #eef2ff !important;
+}
+
+.reconcile-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.reconcile-pass {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.reconcile-fail {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.payment-detail-header {
+  margin-top: 18px;
+  margin-bottom: 18px;
+}
+
+.payment-reconcile-note {
+  margin-bottom: 14px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.payment-pie-card {
+  align-items: stretch;
+}
+
+.payment-pie-content {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+}
+
+.payment-pie-chart {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.payment-pie-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.payment-legend-row {
+  display: grid;
+  grid-template-columns: 12px 72px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.payment-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.payment-legend-name {
+  color: #334155;
+  font-weight: 600;
+}
+
+.payment-legend-value {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.payment-legend-pct {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.payment-bridge-card {
+  align-items: stretch;
+}
+
+.payment-bridge-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.payment-bridge-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.payment-bridge-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.payment-bridge-label {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.payment-bridge-value {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.payment-bridge-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.payment-bridge-bar {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.payment-bridge-meta {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .serial-number {
   color: #6b7280;
   font-weight: 500;
