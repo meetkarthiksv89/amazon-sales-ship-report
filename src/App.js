@@ -2584,9 +2584,6 @@ const AppContent = () => {
           </FeatureLocked>
         )}
 
-        <footer className="footer">
-          <p>Built for efficient Amazon self-ship operations</p>
-        </footer>
       </div>
     </div>
   );
